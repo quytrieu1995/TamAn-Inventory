@@ -9,6 +9,9 @@ export type PermissionCode =
   | 'production.create'
   | 'report.view'
   | 'report.manage'
+  | 'supplier.manage'
+  | 'material.manage'
+  | 'user.manage'
 
 export type AuthContext = {
   userId: Id
@@ -123,4 +126,15 @@ export type MonthlySnapshot = {
   totalDisposalAmount: number
   endingInventoryAmount: number
   endingInventoryQuantity: number
+}
+
+export type MaterialStockRow = {
+  materialId: Id
+  code: string
+  name: string
+  batchId: Id
+  batchNo: string
+  quantityOnHand: number
+  minimumStock: number
+  storageDays: number
 }

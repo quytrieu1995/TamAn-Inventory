@@ -1,4 +1,5 @@
 import type { Request } from 'express'
+import type { Pool } from 'pg'
 import { ValidationError } from './errors'
 import type { AuthContext, PermissionCode } from './types'
 
@@ -10,6 +11,47 @@ const splitHeader = (value: string | string[] | undefined) => {
     .filter(Boolean)
 }
 
+const listPermissionsFromDatabase = async (pool: Pool, userId: string, plantId: string) => {
+  const result = await pool.query(
+    `
+      SELECT DISTINCT p.code
+      FROM user_roles ur
+      INNER JOIN roles r ON r.id = ur.role_id
+      INNER JOIN role_permissions rp ON rp.role_id = r.id
+      INNER JOIN permissions p ON p.id = rp.permission_id
+      WHERE ur.user_id = $1
+        AND (ur.plant_id IS NULL OR ur.plant_id = $2)
+      ORDER BY p.code ASC
+    `,
+    [userId, plantId]
+  )
+
+  return result.rows.map((row) => String(row.code)) as PermissionCode[]
+}
+
+const listWarehousesFromDatabase = async (pool: Pool, userId: string, plantId: string) => {
+  const result = await pool.query(
+    `
+      SELECT
+        bool_or(ur.warehouse_id IS NULL) AS has_all_warehouses,
+        array_remove(array_agg(DISTINCT ur.warehouse_id::text), NULL) AS warehouse_ids
+      FROM user_roles ur
+      WHERE ur.user_id = $1
+        AND (ur.plant_id IS NULL OR ur.plant_id = $2)
+    `,
+    [userId, plantId]
+  )
+
+  const row = result.rows[0]
+  const hasAllWarehouses = Boolean(row?.has_all_warehouses)
+  if (hasAllWarehouses) {
+    return []
+  }
+
+  const values = Array.isArray(row?.warehouse_ids) ? row.warehouse_ids : []
+  return values.map((value: unknown) => String(value))
+}
+
 export const getAuthContextFromRequest = (request: Request): AuthContext => {
   const userId = request.header('x-user-id') ?? 'anonymous'
   const plantId = request.header('x-plant-id')
@@ -19,6 +61,32 @@ export const getAuthContextFromRequest = (request: Request): AuthContext => {
 
   const warehouseIds = splitHeader(request.header('x-warehouse-ids'))
   const permissions = splitHeader(request.header('x-permissions')) as PermissionCode[]
+
+  return {
+    userId,
+    plantId,
+    warehouseIds,
+    permissions
+  }
+}
+
+export const resolveAuthContextFromRequest = async (request: Request, pool: Pool): Promise<AuthContext> => {
+  const userId = request.header('x-user-id') ?? 'anonymous'
+  const plantId = request.header('x-plant-id')
+  if (!plantId) {
+    throw new ValidationError('Missing required x-plant-id header')
+  }
+
+  const headerWarehouseIds = splitHeader(request.header('x-warehouse-ids'))
+  const headerPermissions = splitHeader(request.header('x-permissions')) as PermissionCode[]
+
+  const permissions = headerPermissions.length > 0
+    ? headerPermissions
+    : await listPermissionsFromDatabase(pool, userId, plantId)
+
+  const warehouseIds = headerWarehouseIds.length > 0
+    ? headerWarehouseIds
+    : await listWarehousesFromDatabase(pool, userId, plantId)
 
   return {
     userId,

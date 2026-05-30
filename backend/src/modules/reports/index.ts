@@ -84,8 +84,41 @@ export const createReportService = ({ inventoryRepository, snapshotRepository }:
     return snapshot
   }
 
+  const getMonthlySummary = async (
+    auth: AuthContext,
+    input: {
+      monthKey: string
+      warehouseId: string
+    }
+  ) => {
+    requirePermission(auth, 'report.view')
+    requireWarehouseAccess(auth, input.warehouseId)
+    const movements = await inventoryRepository.listMovementsByMonth(auth.plantId, input.monthKey)
+    const scoped = movements.filter((movement) => movement.warehouseId === input.warehouseId)
+
+    return {
+      monthKey: input.monthKey,
+      warehouseId: input.warehouseId,
+      totalReceiptAmount: scoped
+        .filter((movement) => movement.direction === 1 && movement.materialId)
+        .reduce((accumulator, movement) => accumulator + movement.quantity * movement.unitCost, 0),
+      totalIssueAmount: scoped
+        .filter((movement) => movement.direction === -1 && movement.materialId)
+        .reduce((accumulator, movement) => accumulator + movement.quantity * movement.unitCost, 0),
+      totalDisposalAmount: scoped
+        .filter((movement) => movement.movementType === 'DISPOSAL')
+        .reduce((accumulator, movement) => accumulator + movement.quantity * movement.unitCost, 0),
+      endingInventoryAmount: scoped.reduce((accumulator, movement) => {
+        const value = movement.quantity * movement.unitCost
+        return accumulator + (movement.direction === 1 ? value : -value)
+      }, 0),
+      movementCount: scoped.length
+    }
+  }
+
   return {
     getDashboard,
-    buildMonthlySnapshot
+    buildMonthlySnapshot,
+    getMonthlySummary
   }
 }

@@ -1,0 +1,11 @@
+{
+  "/_not-found/page": "/_not-found",
+  "/dashboard/page": "/dashboard",
+  "/finished-goods/page": "/finished-goods",
+  "/page": "/",
+  "/recipes/page": "/recipes",
+  "/reports/page": "/reports",
+  "/suppliers/page": "/suppliers",
+  "/users/page": "/users",
+  "/materials/page": "/materials"
+}

@@ -59,10 +59,17 @@ export const createMemoryStore = (seedData: SeedData = {}): FoodInventoryReposit
         return movements.filter(
           (movement) => movement.plantId === plantId && movement.warehouseId === warehouseId
         )
+      },
+      listMaterialStocks: async () => {
+        return []
       }
     },
     recipe: {
       getRecipeById: async (recipeId) => recipes.get(recipeId) ?? null,
+      getLatestVersionByFinishedGood: async (finishedGoodId) => {
+        const matched = Array.from(recipes.values()).filter((recipe) => recipe.finishedGoodId === finishedGoodId)
+        return matched.reduce((maximum, recipe) => Math.max(maximum, recipe.versionNo), 0)
+      },
       saveRecipe: async (recipe) => {
         recipes.set(recipe.id, recipe)
       }

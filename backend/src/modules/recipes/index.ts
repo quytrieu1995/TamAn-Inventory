@@ -60,12 +60,13 @@ export const createRecipeService = ({ recipeRepository }: RecipeServiceDependenc
   const createRecipe = async (auth: AuthContext, input: CreateRecipeInput) => {
     requirePermission(auth, 'recipe.manage')
     const now = new Date().toISOString()
+    const latestVersion = await recipeRepository.getLatestVersionByFinishedGood(input.finishedGoodId)
     const recipe: Recipe = {
       id: input.id,
       plantId: input.plantId,
       finishedGoodId: input.finishedGoodId,
       name: input.name,
-      versionNo: 1,
+      versionNo: latestVersion + 1,
       items: input.items,
       updatedAt: now
     }

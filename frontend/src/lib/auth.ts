@@ -7,6 +7,9 @@ export type FrontendPermission =
   | 'production.create'
   | 'report.view'
   | 'report.manage'
+  | 'supplier.manage'
+  | 'material.manage'
+  | 'user.manage'
 
 export type FrontendSession = {
   userName: string

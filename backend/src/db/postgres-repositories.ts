@@ -2,6 +2,7 @@ import type { Pool, PoolClient } from 'pg'
 import type {
   Material,
   MaterialBatch,
+  MaterialStockRow,
   ProductionOrder,
   StockMovement
 } from '../core/types'
@@ -58,6 +59,17 @@ const mapProductionOrder = (row: Record<string, unknown>): ProductionOrder => ({
   actualQty: Number(row.actual_qty),
   status: String(row.status) as ProductionOrder['status'],
   createdAt: new Date(String(row.created_at)).toISOString()
+})
+
+const mapMaterialStock = (row: Record<string, unknown>): MaterialStockRow => ({
+  materialId: String(row.material_id),
+  code: String(row.material_code),
+  name: String(row.material_name),
+  batchId: String(row.batch_id),
+  batchNo: String(row.batch_no),
+  quantityOnHand: Number(row.quantity_on_hand),
+  minimumStock: Number(row.minimum_stock),
+  storageDays: Number(row.storage_days)
 })
 
 const createInventoryRepository = (db: DbExecutor): FoodInventoryRepositories['inventory'] => ({
@@ -186,6 +198,31 @@ const createInventoryRepository = (db: DbExecutor): FoodInventoryRepositories['i
     )
 
     return result.rows.map(mapMovement)
+  },
+
+  listMaterialStocks: async (plantId, warehouseId) => {
+    const result = await db.query(
+      `
+        SELECT
+          m.id AS material_id,
+          m.code AS material_code,
+          m.name AS material_name,
+          b.id AS batch_id,
+          b.batch_no,
+          b.qty_available AS quantity_on_hand,
+          m.minimum_stock,
+          GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - b.received_at)) / 86400))::int AS storage_days
+        FROM material_batches b
+        INNER JOIN materials m ON m.id = b.material_id
+        WHERE b.plant_id = $1
+          AND b.warehouse_id = $2
+          AND b.qty_available > 0
+        ORDER BY m.code ASC, b.received_at ASC
+      `,
+      [plantId, warehouseId]
+    )
+
+    return result.rows.map(mapMaterialStock)
   }
 })
 
@@ -228,6 +265,19 @@ const createRecipeRepository = (db: DbExecutor): FoodInventoryRepositories['reci
       })),
       updatedAt: new Date(String(recipeRow.updated_at)).toISOString()
     }
+  },
+
+  getLatestVersionByFinishedGood: async (finishedGoodId) => {
+    const result = await db.query(
+      `
+        SELECT COALESCE(MAX(version_no), 0) AS max_version
+        FROM recipes
+        WHERE finished_good_id = $1
+      `,
+      [finishedGoodId]
+    )
+
+    return Number(result.rows[0]?.max_version ?? 0)
   },
 
   saveRecipe: async (recipe) => {

@@ -3,6 +3,7 @@ import type {
   Id,
   Material,
   MaterialBatch,
+  MaterialStockRow,
   MonthlySnapshot,
   ProductionOrder,
   Recipe,
@@ -29,10 +30,12 @@ export type InventoryRepository = {
   saveMovement: (movement: StockMovement) => Promise<void>
   listMovementsByMonth: (plantId: Id, monthKey: string) => Promise<StockMovement[]>
   listMovementsByWarehouse: (plantId: Id, warehouseId: Id) => Promise<StockMovement[]>
+  listMaterialStocks: (plantId: Id, warehouseId: Id) => Promise<MaterialStockRow[]>
 }
 
 export type RecipeRepository = {
   getRecipeById: (recipeId: Id) => Promise<Recipe | null>
+  getLatestVersionByFinishedGood: (finishedGoodId: Id) => Promise<number>
   saveRecipe: (recipe: Recipe) => Promise<void>
 }
 

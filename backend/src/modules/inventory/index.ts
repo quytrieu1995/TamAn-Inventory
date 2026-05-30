@@ -161,7 +161,11 @@ export const createInventoryService = ({ inventoryRepository }: InventoryService
           warehouseId: input.warehouseId,
           materialId: item.materialId,
           batchId: allocation.batch.id,
-          movementType: input.referenceType === 'PRODUCTION' ? 'PRODUCTION_CONSUME' : 'ISSUE',
+          movementType: input.referenceType === 'PRODUCTION'
+            ? 'PRODUCTION_CONSUME'
+            : input.referenceType === 'DISPOSAL'
+              ? 'DISPOSAL'
+              : 'ISSUE',
           direction: -1,
           quantity: allocation.quantity,
           unitCost: allocation.batch.unitPrice,
@@ -226,10 +230,17 @@ export const createInventoryService = ({ inventoryRepository }: InventoryService
     return movements
   }
 
+  const getMaterialStocks = async (auth: AuthContext, warehouseId: string) => {
+    requireWarehouseAccess(auth, warehouseId)
+    const rows = await inventoryRepository.listMaterialStocks(auth.plantId, warehouseId)
+    return rows
+  }
+
   return {
     receiveMaterials,
     issueMaterialsFifo,
     adjustInventory,
-    getWarehouseLedger
+    getWarehouseLedger,
+    getMaterialStocks
   }
 }

@@ -1,66 +1,63 @@
-import PermissionGate from '../../components/PermissionGate'
-import { mockSession } from '../../lib/auth'
+import { apiClient, formatCurrencyVnd } from '../../lib/api'
 
-const monthlySummary = {
-  month: '2026-05',
-  receiptAmount: 1240000000,
-  issueAmount: 980000000,
-  disposalAmount: 18000000,
-  endingInventoryAmount: 2420000000
-}
+const ReportsPage = async () => {
+  const monthlySummary = await apiClient.getMonthlySummary('2026-05')
 
-const formatCurrency = (amount: number) => {
-  return new Intl.NumberFormat('vi-VN', {
-    style: 'currency',
-    currency: 'VND',
-    maximumFractionDigits: 0
-  }).format(amount)
-}
-
-const ReportsPage = () => {
   return (
-    <main className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4">
-      <h1 className="text-2xl font-semibold">Bao cao thang</h1>
-      <p className="text-sm text-slate-600">
-        Bao cao xuat, nhap, huy, chi phi NVL va ton kho cuoi ky theo tung kho.
-      </p>
+    <main className="app-shell flex flex-col gap-4 py-4 md:gap-6 md:py-6">
+      <div>
+        <h1 className="text-xl font-semibold md:text-3xl">Báo cáo tháng</h1>
+        <p className="muted-text text-sm md:text-base">
+          Báo cáo xuất, nhập, huỷ, chi phí NVL và tồn kho cuối kỳ theo từng kho.
+        </p>
+      </div>
 
-      <PermissionGate
-        session={mockSession}
-        permission="report.view"
-        fallback={<p className="rounded-md bg-red-50 p-4 text-sm text-red-700">Ban khong co quyen xem bao cao</p>}
-      >
-        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Tong hop thang {monthlySummary.month}</h2>
-            <button
-              type="button"
-              aria-label="Tai ve bao cao thang"
-              className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium"
-            >
-              Tai ve
-            </button>
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <article className="surface-card p-4">
+          <p className="text-xs uppercase text-slate-500">Kỳ báo cáo</p>
+          <p className="mt-1 text-lg font-semibold">{monthlySummary.monthKey}</p>
+        </article>
+        <article className="surface-card p-4">
+          <p className="text-xs uppercase text-slate-500">Kho</p>
+          <p className="mt-1 text-lg font-semibold">WH-DEMO</p>
+        </article>
+        <article className="surface-card p-4">
+          <p className="text-xs uppercase text-slate-500">Trạng thái</p>
+          <p className="status-pill mt-1 bg-emerald-100 text-emerald-700">Synced</p>
+        </article>
+      </section>
+
+      <section className="surface-card p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Tổng hợp tháng {monthlySummary.monthKey}</h2>
+          <button
+            type="button"
+            aria-label="Tai ve bao cao thang"
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50"
+          >
+            Tải về
+          </button>
+        </div>
+
+        <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="rounded-xl border border-slate-100 bg-white p-3">
+            <dt className="text-xs uppercase text-slate-500">Giá trị nhập</dt>
+            <dd className="text-lg font-semibold">{formatCurrencyVnd(monthlySummary.totalReceiptAmount)}</dd>
           </div>
-          <dl className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <div className="rounded-md border border-slate-100 p-3">
-              <dt className="text-xs uppercase text-slate-500">Gia tri nhap</dt>
-              <dd className="text-lg font-semibold">{formatCurrency(monthlySummary.receiptAmount)}</dd>
-            </div>
-            <div className="rounded-md border border-slate-100 p-3">
-              <dt className="text-xs uppercase text-slate-500">Gia tri xuat</dt>
-              <dd className="text-lg font-semibold">{formatCurrency(monthlySummary.issueAmount)}</dd>
-            </div>
-            <div className="rounded-md border border-slate-100 p-3">
-              <dt className="text-xs uppercase text-slate-500">Gia tri huy</dt>
-              <dd className="text-lg font-semibold">{formatCurrency(monthlySummary.disposalAmount)}</dd>
-            </div>
-            <div className="rounded-md border border-slate-100 p-3">
-              <dt className="text-xs uppercase text-slate-500">Ton cuoi ky</dt>
-              <dd className="text-lg font-semibold">{formatCurrency(monthlySummary.endingInventoryAmount)}</dd>
-            </div>
-          </dl>
-        </section>
-      </PermissionGate>
+          <div className="rounded-xl border border-slate-100 bg-white p-3">
+            <dt className="text-xs uppercase text-slate-500">Giá trị xuất</dt>
+            <dd className="text-lg font-semibold">{formatCurrencyVnd(monthlySummary.totalIssueAmount)}</dd>
+          </div>
+          <div className="rounded-xl border border-slate-100 bg-white p-3">
+            <dt className="text-xs uppercase text-slate-500">Giá trị huỷ</dt>
+            <dd className="text-lg font-semibold">{formatCurrencyVnd(monthlySummary.totalDisposalAmount)}</dd>
+          </div>
+          <div className="rounded-xl border border-slate-100 bg-white p-3">
+            <dt className="text-xs uppercase text-slate-500">Tồn cuối kỳ</dt>
+            <dd className="text-lg font-semibold">{formatCurrencyVnd(monthlySummary.endingInventoryAmount)}</dd>
+          </div>
+        </dl>
+      </section>
     </main>
   )
 }

@@ -1,33 +1,76 @@
-const kpis = [
-  { title: 'Gia tri ton kho', value: '2.48 ty', trend: '+4.2%' },
-  { title: 'Ty le huy', value: '1.8%', trend: '-0.4%' },
-  { title: 'Chi phi NVL thang', value: '1.12 ty', trend: '+2.1%' },
-  { title: 'Canh bao mo', value: '9', trend: '+3' }
+import { apiClient, formatCurrencyVnd } from '../../lib/api'
+
+const quickHighlights = [
+  { label: 'Mã tiêu thụ cao', value: 'SUGAR001' },
+  { label: 'Lệnh đang chạy', value: '12 lệnh' },
+  { label: 'Kho cần cảnh báo', value: '2/6 kho' }
 ]
 
-const DashboardPage = () => {
+const DashboardPage = async () => {
+  const dashboard = await apiClient.getDashboard()
+
+  const kpis = [
+    { title: 'Giá trị nhập', value: formatCurrencyVnd(dashboard.totalReceipt), trend: 'Dữ liệu thời gian thực' },
+    { title: 'Giá trị xuất', value: formatCurrencyVnd(dashboard.totalIssue), trend: 'Dữ liệu thời gian thực' },
+    { title: 'Giá trị huỷ', value: formatCurrencyVnd(dashboard.totalDisposal), trend: 'Dữ liệu thời gian thực' },
+    { title: 'Số giao dịch', value: `${dashboard.movementCount}`, trend: 'Dữ liệu thời gian thực' }
+  ]
+
   return (
-    <main className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4">
-      <section>
-        <h1 className="text-2xl font-semibold">Dashboard tong quan</h1>
-        <p className="text-sm text-slate-600">
-          Tong hop KPI ton kho, canh bao, chi phi NVL va xu huong van hanh theo nha may.
+    <main className="app-shell flex flex-col gap-4 py-4 md:gap-6 md:py-6">
+      <section className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-slate-950 via-blue-950 to-cyan-900 p-4 text-white shadow-xl md:p-6">
+        <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-cyan-300/20 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-8 left-6 h-28 w-28 rounded-full bg-indigo-300/30 blur-3xl" />
+        <h1 className="text-xl font-semibold md:text-3xl">Bảng điều khiển tổng quan</h1>
+        <p className="mt-1 max-w-3xl text-sm text-slate-200 md:text-base">
+          Tổng hợp KPI tồn kho, cảnh báo, chi phí nguyên vật liệu và xu hướng vận hành theo thời gian thực.
         </p>
+        <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
+          {quickHighlights.map((item) => (
+            <div key={item.label} className="rounded-2xl border border-white/20 bg-white/10 p-3 backdrop-blur">
+              <p className="text-xs uppercase tracking-wide text-cyan-100">{item.label}</p>
+              <p className="mt-1 text-sm font-semibold md:text-base">{item.value}</p>
+            </div>
+          ))}
+        </div>
       </section>
 
-      <section className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {kpis.map((kpi) => (
           <article
             key={kpi.title}
             tabIndex={0}
             aria-label={`KPI ${kpi.title}`}
-            className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
+            className="surface-card p-4 transition hover:-translate-y-0.5 hover:shadow-md"
           >
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{kpi.title}</p>
-            <p className="mt-2 text-2xl font-semibold text-slate-900">{kpi.value}</p>
-            <p className="mt-1 text-sm text-slate-600">{kpi.trend}</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-[var(--color-muted)]">{kpi.title}</p>
+            <p className="mt-2 text-2xl font-semibold tracking-tight text-[var(--color-text)] md:text-3xl">{kpi.value}</p>
+            <p className="mt-1 text-sm font-medium text-blue-600">{kpi.trend}</p>
           </article>
         ))}
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <article className="surface-card p-4">
+          <h2 className="text-base font-semibold md:text-lg">Cảnh báo cần xử lý</h2>
+          <ul className="mt-3 space-y-2 text-sm text-slate-700">
+            <li className="rounded-xl border border-amber-100 bg-amber-50 p-3">SUGAR001 dưới mức tồn tối thiểu tại kho WH-DEMO</li>
+            <li className="rounded-xl border border-rose-100 bg-rose-50 p-3">BUTTER001 lưu kho 31 ngày, cần theo dõi xoay lô</li>
+          </ul>
+        </article>
+        <article className="surface-card p-4">
+          <h2 className="text-base font-semibold md:text-lg">Hiệu suất vận hành</h2>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+            <div className="rounded-xl border border-slate-100 bg-white p-3">
+              <p className="text-slate-500">Tỷ lệ đúng BOM</p>
+              <p className="mt-1 text-lg font-semibold">98.7%</p>
+            </div>
+            <div className="rounded-xl border border-slate-100 bg-white p-3">
+              <p className="text-slate-500">Thời gian chu kỳ</p>
+              <p className="mt-1 text-lg font-semibold">2.4 ngày</p>
+            </div>
+          </div>
+        </article>
       </section>
     </main>
   )
