@@ -1,0 +1,47 @@
+{
+  "name": "taman-inventory",
+  "version": "1.0.0",
+  "description": "MVP foundation for multi-plant, multi-warehouse food material and finished-goods management.",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch backend/src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "db:migrate": "tsx backend/src/scripts/migrate.ts",
+    "idempotency:cleanup": "tsx backend/src/scripts/idempotency-cleanup.ts",
+    "test": "node --import tsx --test backend/src/tests/**/*.test.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/quytrieu1995/TamAn-Inventory.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/quytrieu1995/TamAn-Inventory/issues"
+  },
+  "homepage": "https://github.com/quytrieu1995/TamAn-Inventory#readme",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "helmet": "^8.2.0",
+    "node-cron": "^4.2.1",
+    "pg": "^8.21.0",
+    "pino": "^10.3.1",
+    "pino-http": "^11.0.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.9.1",
+    "@types/pg": "^8.20.0",
+    "@types/supertest": "^7.2.0",
+    "pg-mem": "^3.0.14",
+    "supertest": "^7.2.2",
+    "tsx": "^4.22.3",
+    "typescript": "^6.0.3"
+  }
+}
