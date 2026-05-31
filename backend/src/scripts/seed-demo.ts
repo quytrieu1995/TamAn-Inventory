@@ -200,7 +200,7 @@ const run = async () => {
 
     await client.query(
       'INSERT INTO finished_goods (id, plant_id, code, name, uom) VALUES ($1, $2, $3, $4, $5)',
-      [DEMO.finishedGoodId, DEMO.plantId, 'FG-COOKIE-001', 'Banh quy bo', 'kg']
+      [DEMO.finishedGoodId, DEMO.plantId, 'FG-COOKIE-001', 'Banh quy bo', 'goi']
     )
     await client.query(
       'INSERT INTO recipes (id, plant_id, finished_good_id, version_no, status) VALUES ($1, $2, $3, 1, $4)',

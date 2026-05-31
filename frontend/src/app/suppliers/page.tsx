@@ -34,9 +34,16 @@ const SuppliersPage = () => {
   const [showReceiptDetailModal, setShowReceiptDetailModal] = useState(false)
   const [loadingReceiptDetail, setLoadingReceiptDetail] = useState(false)
   const [receiptDetail, setReceiptDetail] = useState<PurchaseReceiptDetail | null>(null)
+  const [cancelingReceiptId, setCancelingReceiptId] = useState<string | null>(null)
+  const [cancelReceiptNo, setCancelReceiptNo] = useState('')
+  const [cancelReason, setCancelReason] = useState('')
   const [feedback, setFeedback] = useState<string | null>(null)
 
   const canManage = session?.permissions.includes('supplier.manage') ?? false
+  const canCancelOrder = session?.permissions.includes('inventory.cancel')
+    || session?.permissions.includes('inventory.receive')
+    || session?.permissions.includes('inventory.adjust')
+    || false
 
   const loadSuppliers = async () => {
     const rows = await apiClient.getSuppliers()
@@ -144,6 +151,43 @@ const SuppliersPage = () => {
   const handleCloseReceiptDetailModal = () => {
     setShowReceiptDetailModal(false)
     setReceiptDetail(null)
+  }
+
+  const handleOpenCancelReceiptModal = (receiptId: string, receiptNo: string) => {
+    setCancelingReceiptId(receiptId)
+    setCancelReceiptNo(receiptNo)
+    setCancelReason('')
+  }
+
+  const handleCloseCancelReceiptModal = () => {
+    setCancelingReceiptId(null)
+    setCancelReceiptNo('')
+    setCancelReason('')
+  }
+
+  const handleConfirmCancelReceipt = async () => {
+    if (!cancelingReceiptId) {
+      return
+    }
+    if (!cancelReason.trim()) {
+      setFeedback('Vui lòng nhập lý do huỷ')
+      return
+    }
+    try {
+      await apiClient.cancelInventoryAction({
+        referenceType: 'PURCHASE_RECEIPT',
+        referenceId: cancelingReceiptId,
+        reason: cancelReason.trim()
+      })
+      if (supplierDetail) {
+        const detail = await apiClient.getSupplierDetail(supplierDetail.supplier.id)
+        setSupplierDetail(detail)
+      }
+      setFeedback('Đã huỷ lệnh đặt hàng')
+      handleCloseCancelReceiptModal()
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : 'Không thể huỷ lệnh đặt hàng')
+    }
   }
 
   if (!canManage) {
@@ -285,7 +329,9 @@ const SuppliersPage = () => {
                     <th className="px-3 py-2 text-right">Số dòng</th>
                     <th className="px-3 py-2 text-right">Tổng SL</th>
                     <th className="px-3 py-2 text-right">Tổng tiền</th>
+                    <th className="px-3 py-2">Trạng thái</th>
                     <th className="px-3 py-2">Ghi chú</th>
+                    <th className="px-3 py-2 text-right">Thao tác</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -306,12 +352,27 @@ const SuppliersPage = () => {
                       <td className="px-3 py-3 text-right">{receipt.itemCount}</td>
                       <td className="px-3 py-3 text-right">{receipt.totalQuantity}</td>
                       <td className="px-3 py-3 text-right">{formatCurrencyVnd(receipt.totalAmount)}</td>
+                      <td className="px-3 py-3">
+                        <span className={`rounded-full px-2 py-1 text-xs font-semibold ${receipt.status === 'CANCELLED' ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                          {receipt.statusLabel}
+                        </span>
+                      </td>
                       <td className="px-3 py-3">{receipt.note || '-'}</td>
+                      <td className="px-3 py-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenCancelReceiptModal(receipt.id, receipt.receiptNo)}
+                          disabled={receipt.status === 'CANCELLED' || !canCancelOrder}
+                          className="rounded-lg border border-rose-200 px-3 py-1 text-xs text-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Huỷ
+                        </button>
+                      </td>
                     </tr>
                   ))}
                   {supplierDetail.receipts.length === 0 && (
                     <tr className="bg-white">
-                      <td colSpan={7} className="px-3 py-4 text-center text-sm text-slate-500">
+                      <td colSpan={9} className="px-3 py-4 text-center text-sm text-slate-500">
                         Nhà cung cấp này chưa có đơn nhập nào
                       </td>
                     </tr>
@@ -378,6 +439,44 @@ const SuppliersPage = () => {
                   </tr>
                 </tfoot>
               </table>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {cancelingReceiptId && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 p-4">
+          <section className="w-full max-w-xl rounded-2xl bg-white p-4 shadow-xl" role="dialog" aria-modal="true" aria-label="Xác nhận huỷ lệnh đặt hàng">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-base font-semibold">Xác nhận huỷ lệnh đặt hàng</h2>
+              <button type="button" onClick={handleCloseCancelReceiptModal} className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-sm">
+                Đóng
+              </button>
+            </div>
+            <p className="mb-2 text-sm text-slate-700">
+              Bạn đang huỷ đơn <span className="font-semibold">{cancelReceiptNo}</span>. Vui lòng nhập lý do huỷ.
+            </p>
+            <textarea
+              className="min-h-[100px] w-full rounded-lg border border-slate-200 bg-white p-2 text-sm"
+              placeholder="Nhập lý do huỷ (bắt buộc)"
+              value={cancelReason}
+              onChange={(event) => setCancelReason(event.target.value)}
+            />
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={handleConfirmCancelReceipt}
+                className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white"
+              >
+                Xác nhận huỷ
+              </button>
+              <button
+                type="button"
+                onClick={handleCloseCancelReceiptModal}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm"
+              >
+                Huỷ bỏ
+              </button>
             </div>
           </section>
         </div>

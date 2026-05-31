@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { z } from 'zod'
-import { ConflictError, NotFoundError } from '../core/errors'
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../core/errors'
 import { resolveAuthContextFromRequest } from '../core/http'
 import { hashPassword, verifyPassword } from '../core/password'
 import { createPostgresRepositories } from '../db/postgres-repositories'
@@ -13,6 +13,11 @@ import { toSuccessResponse } from './response'
 import type { AppServices, RouterDependencies } from './types'
 
 const idSchema = z.string().uuid()
+const finishedGoodUomSchema = z.string()
+  .trim()
+  .toLowerCase()
+  .refine((value) => ['lon', 'chai', 'goi'].includes(value), 'Đơn vị tính sản phẩm chỉ hỗ trợ: lon, chai, gói')
+const SYSTEM_ROLE_CODES = new Set(['SUPER_ADMIN'])
 
 const createTransactionalServices = (dependencies: RouterDependencies, client: Parameters<typeof createPostgresRepositories>[0]) => {
   const repositories = createPostgresRepositories(client)
@@ -27,6 +32,115 @@ const runInTransaction = async <T>(
     const transactionalServices = createTransactionalServices(dependencies, client)
     return callback(transactionalServices)
   })
+}
+
+const ensureUserPermissionsTable = async (pool: RouterDependencies['pool']) => {
+  await pool.query(
+    `
+      CREATE TABLE IF NOT EXISTS user_permissions (
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        permission_id UUID NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
+        plant_id UUID REFERENCES plants(id),
+        warehouse_id UUID REFERENCES warehouses(id),
+        PRIMARY KEY (user_id, permission_id, plant_id, warehouse_id)
+      )
+    `
+  )
+}
+
+const ensureInventoryActionStatusesTable = async (pool: RouterDependencies['pool']) => {
+  await pool.query(
+    `
+      CREATE TABLE IF NOT EXISTS inventory_action_statuses (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        plant_id UUID NOT NULL REFERENCES plants(id),
+        warehouse_id UUID NOT NULL REFERENCES warehouses(id),
+        reference_type TEXT NOT NULL,
+        reference_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'CANCELLED',
+        reason TEXT,
+        cancelled_by UUID REFERENCES users(id),
+        cancelled_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        UNIQUE (plant_id, warehouse_id, reference_type, reference_id)
+      )
+    `
+  )
+}
+
+const ensureFinishedGoodsUnitPriceColumn = async (pool: RouterDependencies['pool']) => {
+  await pool.query(
+    `
+      ALTER TABLE finished_goods
+      ADD COLUMN IF NOT EXISTS unit_price NUMERIC(16, 2) NOT NULL DEFAULT 0
+    `
+  )
+}
+
+const PERMISSION_CATALOG: Array<{ code: string, description: string }> = [
+  { code: 'material.view', description: 'Xem nguyên liệu' },
+  { code: 'material.create', description: 'Thêm nguyên liệu' },
+  { code: 'material.update', description: 'Chỉnh sửa nguyên liệu' },
+  { code: 'material.delete', description: 'Xoá nguyên liệu' },
+  { code: 'material.cancel', description: 'Huỷ nghiệp vụ nguyên liệu' },
+  { code: 'material.manage', description: 'Quản lý nguyên liệu (legacy)' },
+  { code: 'supplier.view', description: 'Xem nhà cung cấp' },
+  { code: 'supplier.create', description: 'Thêm nhà cung cấp' },
+  { code: 'supplier.update', description: 'Chỉnh sửa nhà cung cấp' },
+  { code: 'supplier.delete', description: 'Xoá nhà cung cấp' },
+  { code: 'supplier.cancel', description: 'Huỷ nghiệp vụ nhà cung cấp' },
+  { code: 'supplier.manage', description: 'Quản lý nhà cung cấp (legacy)' },
+  { code: 'recipe.view', description: 'Xem công thức' },
+  { code: 'recipe.create', description: 'Thêm công thức' },
+  { code: 'recipe.update', description: 'Chỉnh sửa công thức' },
+  { code: 'recipe.delete', description: 'Xoá công thức' },
+  { code: 'recipe.cancel', description: 'Huỷ phiên bản công thức' },
+  { code: 'recipe.manage', description: 'Quản lý công thức (legacy)' },
+  { code: 'inventory.receive', description: 'Nhập kho NVL' },
+  { code: 'inventory.issue', description: 'Xuất kho NVL' },
+  { code: 'inventory.adjust', description: 'Điều chỉnh/hủy NVL' },
+  { code: 'inventory.cancel', description: 'Huỷ phiếu kho' },
+  { code: 'production.view', description: 'Xem sản xuất' },
+  { code: 'production.create', description: 'Tạo lệnh sản xuất' },
+  { code: 'production.approve', description: 'Xét duyệt lệnh sản xuất' },
+  { code: 'production.update', description: 'Chỉnh sửa lệnh sản xuất' },
+  { code: 'production.delete', description: 'Xoá lệnh sản xuất' },
+  { code: 'production.cancel', description: 'Huỷ nghiệp vụ sản xuất' },
+  { code: 'report.view', description: 'Xem báo cáo' },
+  { code: 'report.create', description: 'Tạo báo cáo' },
+  { code: 'report.update', description: 'Chỉnh sửa cấu hình báo cáo' },
+  { code: 'report.delete', description: 'Xoá báo cáo' },
+  { code: 'report.cancel', description: 'Huỷ tác vụ báo cáo' },
+  { code: 'report.manage', description: 'Quản lý báo cáo (legacy)' },
+  { code: 'user.manage', description: 'Quản lý người dùng và phân quyền' }
+]
+
+const ensurePermissionCatalog = async (pool: RouterDependencies['pool']) => {
+  for (const permission of PERMISSION_CATALOG) {
+    await pool.query(
+      `
+        INSERT INTO permissions (id, code, description)
+        VALUES (gen_random_uuid(), $1, $2)
+        ON CONFLICT (code) DO UPDATE
+        SET description = EXCLUDED.description
+      `,
+      [permission.code, permission.description]
+    )
+  }
+
+  await pool.query(
+    `
+      INSERT INTO role_permissions (role_id, permission_id)
+      SELECT rp.role_id, approve_permission.id
+      FROM role_permissions rp
+      INNER JOIN permissions create_permission ON create_permission.id = rp.permission_id
+      CROSS JOIN permissions approve_permission
+      WHERE create_permission.code = 'production.create'
+        AND approve_permission.code = 'production.approve'
+      ON CONFLICT DO NOTHING
+    `
+  )
 }
 
 const getProductionOrderStatusLabel = (status: string) => {
@@ -137,6 +251,13 @@ const getReferenceTypeLabel = (referenceType: string) => {
   return referenceType
 }
 
+const getActionStatusLabel = (status: string) => {
+  if (status === 'CANCELLED') {
+    return 'Đã huỷ'
+  }
+  return 'Đang hiệu lực'
+}
+
 const toInventoryMovementResponse = <T extends { movementType: string, referenceType: string }>(movement: T) => ({
   ...movement,
   movementTypeLabel: getMovementTypeLabel(movement.movementType),
@@ -157,6 +278,28 @@ const toProductionOrderResponse = (order: {
   ...order,
   statusLabel: getProductionOrderStatusLabel(order.status)
 })
+
+const getMonthRangeFromMonthKey = (monthKey: string) => {
+  const [yearRaw, monthRaw] = monthKey.split('-')
+  const year = Number(yearRaw)
+  const monthIndex = Number(monthRaw) - 1
+  const start = new Date(Date.UTC(year, monthIndex, 1, 0, 0, 0, 0))
+  const end = new Date(Date.UTC(year, monthIndex + 1, 1, 0, 0, 0, 0))
+  return {
+    from: start.toISOString(),
+    to: end.toISOString()
+  }
+}
+
+const getDateRangeFromDayKeys = (fromDateKey: string, toDateKey: string) => {
+  const from = new Date(`${fromDateKey}T00:00:00.000Z`)
+  const toStart = new Date(`${toDateKey}T00:00:00.000Z`)
+  const to = new Date(toStart.getTime() + 24 * 60 * 60 * 1000)
+  return {
+    from: from.toISOString(),
+    to: to.toISOString()
+  }
+}
 
 export const createRouter = (dependencies: RouterDependencies) => {
   const router = Router()
@@ -310,6 +453,7 @@ export const createRouter = (dependencies: RouterDependencies) => {
   router.get('/suppliers/:id/receipts', asyncHandler(async (request, response) => {
     const auth = await getAuthContext(request)
     requirePermission(auth, 'supplier.manage')
+    await ensureInventoryActionStatusesTable(pool)
     const supplierId = String(request.params.id)
 
     const supplierResult = await pool.query(
@@ -334,14 +478,20 @@ export const createRouter = (dependencies: RouterDependencies) => {
           pr.received_at,
           pr.note,
           pr.warehouse_id,
+          COALESCE(ias.status, 'ACTIVE') AS status,
           COALESCE(SUM(pri.quantity), 0) AS total_quantity,
           COALESCE(SUM(pri.quantity * pri.unit_price), 0) AS total_amount,
           COUNT(pri.id)::int AS item_count
         FROM purchase_receipts pr
         LEFT JOIN purchase_receipt_items pri ON pri.receipt_id = pr.id
+        LEFT JOIN inventory_action_statuses ias
+          ON ias.plant_id = pr.plant_id
+         AND ias.warehouse_id = pr.warehouse_id
+         AND ias.reference_type = 'PURCHASE_RECEIPT'
+         AND ias.reference_id = pr.id::text
         WHERE pr.plant_id = $1
           AND pr.supplier_id = $2
-        GROUP BY pr.id, pr.receipt_no, pr.received_at, pr.note, pr.warehouse_id
+        GROUP BY pr.id, pr.receipt_no, pr.received_at, pr.note, pr.warehouse_id, ias.status
         ORDER BY pr.received_at DESC
       `,
       [auth.plantId, supplierId]
@@ -364,6 +514,8 @@ export const createRouter = (dependencies: RouterDependencies) => {
         receivedAt: new Date(String(row.received_at)).toISOString(),
         note: row.note ? String(row.note) : '',
         warehouseId: String(row.warehouse_id),
+        status: String(row.status),
+        statusLabel: getActionStatusLabel(String(row.status)),
         itemCount: Number(row.item_count),
         totalQuantity: Number(row.total_quantity),
         totalAmount: Number(row.total_amount)
@@ -374,6 +526,7 @@ export const createRouter = (dependencies: RouterDependencies) => {
   router.get('/purchase-receipts/:id', asyncHandler(async (request, response) => {
     const auth = await getAuthContext(request)
     requirePermission(auth, 'supplier.manage')
+    await ensureInventoryActionStatusesTable(pool)
     const receiptId = String(request.params.id)
 
     const receiptResult = await pool.query(
@@ -384,11 +537,17 @@ export const createRouter = (dependencies: RouterDependencies) => {
           pr.received_at,
           pr.note,
           pr.warehouse_id,
+          COALESCE(ias.status, 'ACTIVE') AS status,
           pr.supplier_id,
           s.code AS supplier_code,
           s.name AS supplier_name
         FROM purchase_receipts pr
         INNER JOIN suppliers s ON s.id = pr.supplier_id
+        LEFT JOIN inventory_action_statuses ias
+          ON ias.plant_id = pr.plant_id
+         AND ias.warehouse_id = pr.warehouse_id
+         AND ias.reference_type = 'PURCHASE_RECEIPT'
+         AND ias.reference_id = pr.id::text
         WHERE pr.id = $1
           AND pr.plant_id = $2
       `,
@@ -426,6 +585,8 @@ export const createRouter = (dependencies: RouterDependencies) => {
       receivedAt: new Date(String(receiptRow.received_at)).toISOString(),
       note: receiptRow.note ? String(receiptRow.note) : '',
       warehouseId: String(receiptRow.warehouse_id),
+      status: String(receiptRow.status),
+      statusLabel: getActionStatusLabel(String(receiptRow.status)),
       supplier: {
         id: String(receiptRow.supplier_id),
         code: String(receiptRow.supplier_code),
@@ -741,13 +902,15 @@ export const createRouter = (dependencies: RouterDependencies) => {
 
   router.post('/recipes', asyncHandler(async (request, response) => {
     const auth = await getAuthContext(request)
+    await ensureFinishedGoodsUnitPriceColumn(pool)
     const schema = z.object({
       id: idSchema,
       name: z.string().min(1),
       product: z.object({
         code: z.string().min(1),
         name: z.string().min(1),
-        uom: z.string().min(1)
+        uom: finishedGoodUomSchema,
+        unitPrice: z.number().nonnegative()
       }),
       items: z.array(z.object({
         materialId: idSchema,
@@ -761,11 +924,11 @@ export const createRouter = (dependencies: RouterDependencies) => {
       const transactionalServices = createTransactionalServices(dependencies, client)
       const finishedGoodResult = await client.query(
         `
-          INSERT INTO finished_goods (id, plant_id, code, name, uom, is_active, created_at, updated_at)
-          VALUES (gen_random_uuid(), $1, $2, $3, $4, true, now(), now())
+          INSERT INTO finished_goods (id, plant_id, code, name, uom, unit_price, is_active, created_at, updated_at)
+          VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, true, now(), now())
           RETURNING id
         `,
-        [auth.plantId, payload.product.code, payload.product.name, payload.product.uom]
+        [auth.plantId, payload.product.code, payload.product.name, payload.product.uom, payload.product.unitPrice]
       )
 
       return transactionalServices.recipeService.createRecipe(auth, {
@@ -782,9 +945,12 @@ export const createRouter = (dependencies: RouterDependencies) => {
 
   router.put('/recipes/:id', asyncHandler(async (request, response) => {
     const auth = await getAuthContext(request)
+    await ensureFinishedGoodsUnitPriceColumn(pool)
     const schema = z.object({
       name: z.string().min(1),
       productName: z.string().min(1).optional(),
+      productUom: finishedGoodUomSchema.optional(),
+      productUnitPrice: z.number().nonnegative().optional(),
       items: z.array(z.object({
         materialId: idSchema,
         qtyPerUnit: z.number().positive()
@@ -796,16 +962,24 @@ export const createRouter = (dependencies: RouterDependencies) => {
       const transactionalServices = createTransactionalServices(dependencies, client)
       const updatedRecipe = await transactionalServices.recipeService.updateRecipe(auth, String(request.params.id), input)
 
-      if (input.productName) {
+      if (input.productName || input.productUom || input.productUnitPrice !== undefined) {
         await client.query(
           `
             UPDATE finished_goods
-            SET name = $3,
+            SET name = COALESCE($3, name),
+                uom = COALESCE($4, uom),
+                unit_price = COALESCE($5, unit_price),
                 updated_at = now()
             WHERE id = $1
               AND plant_id = $2
           `,
-          [updatedRecipe.finishedGoodId, auth.plantId, input.productName]
+          [
+            updatedRecipe.finishedGoodId,
+            auth.plantId,
+            input.productName ?? null,
+            input.productUom ?? null,
+            input.productUnitPrice ?? null
+          ]
         )
       }
 
@@ -958,6 +1132,245 @@ export const createRouter = (dependencies: RouterDependencies) => {
     return response.json(toSuccessResponse(toInventoryMovementResponse(movement)))
   }))
 
+  router.get('/inventory/actions', asyncHandler(async (request, response) => {
+    const auth = await getAuthContext(request)
+    const schema = z.object({
+      warehouseId: idSchema
+    })
+    const query = schema.parse(request.query)
+    requireWarehouseAccess(auth, query.warehouseId)
+    await ensureInventoryActionStatusesTable(pool)
+
+    const result = await pool.query(
+      `
+        WITH receipt_actions AS (
+          SELECT
+            pr.id::text AS reference_id,
+            'PURCHASE_RECEIPT'::text AS reference_type,
+            'RECEIPT'::text AS action_type,
+            pr.receipt_no AS document_no,
+            pr.received_at AS moved_at,
+            COALESCE(SUM(pri.quantity), 0) AS total_quantity
+          FROM purchase_receipts pr
+          LEFT JOIN purchase_receipt_items pri ON pri.receipt_id = pr.id
+          WHERE pr.plant_id = $1
+            AND pr.warehouse_id = $2
+          GROUP BY pr.id, pr.receipt_no, pr.received_at
+        ),
+        issue_actions AS (
+          SELECT
+            sm.reference_id::text AS reference_id,
+            sm.reference_type,
+            CASE
+              WHEN sm.reference_type = 'DISPOSAL' THEN 'DISPOSAL'
+              ELSE 'ISSUE'
+            END AS action_type,
+            sm.reference_id::text AS document_no,
+            MIN(sm.moved_at) AS moved_at,
+            COALESCE(SUM(sm.quantity), 0) AS total_quantity
+          FROM stock_movements sm
+          WHERE sm.plant_id = $1
+            AND sm.warehouse_id = $2
+            AND sm.direction = -1
+            AND sm.reference_type IN ('MANUAL_ISSUE', 'DISPOSAL')
+          GROUP BY sm.reference_id, sm.reference_type
+        ),
+        actions AS (
+          SELECT * FROM receipt_actions
+          UNION ALL
+          SELECT * FROM issue_actions
+        )
+        SELECT
+          actions.reference_id,
+          actions.reference_type,
+          actions.action_type,
+          actions.document_no,
+          actions.moved_at,
+          actions.total_quantity,
+          COALESCE(ias.status, 'ACTIVE') AS status
+        FROM actions
+        LEFT JOIN inventory_action_statuses ias
+          ON ias.plant_id = $1
+         AND ias.warehouse_id = $2
+         AND ias.reference_type = actions.reference_type
+         AND ias.reference_id = actions.reference_id
+        ORDER BY actions.moved_at DESC
+      `,
+      [auth.plantId, query.warehouseId]
+    )
+
+    return response.json(toSuccessResponse(result.rows.map((row) => ({
+      referenceId: String(row.reference_id),
+      referenceType: String(row.reference_type),
+      actionType: String(row.action_type),
+      documentNo: String(row.document_no),
+      movedAt: new Date(String(row.moved_at)).toISOString(),
+      totalQuantity: Number(row.total_quantity),
+      status: String(row.status),
+      statusLabel: getActionStatusLabel(String(row.status))
+    }))))
+  }))
+
+  router.post('/inventory/actions/cancel', asyncHandler(async (request, response) => {
+    const auth = await getAuthContext(request)
+    const schema = z.object({
+      warehouseId: idSchema,
+      referenceType: z.enum(['PURCHASE_RECEIPT', 'DISPOSAL']),
+      referenceId: z.string().min(1),
+      reason: z.string().optional()
+    })
+    const payload = schema.parse(request.body)
+    requireWarehouseAccess(auth, payload.warehouseId)
+    await ensureInventoryActionStatusesTable(pool)
+    requirePermission(auth, 'inventory.cancel')
+
+    await withTransaction(pool, async (client) => {
+      const currentStatusResult = await client.query(
+        `
+          SELECT status
+          FROM inventory_action_statuses
+          WHERE plant_id = $1
+            AND warehouse_id = $2
+            AND reference_type = $3
+            AND reference_id = $4
+          LIMIT 1
+        `,
+        [auth.plantId, payload.warehouseId, payload.referenceType, payload.referenceId]
+      )
+
+      if (currentStatusResult.rowCount && String(currentStatusResult.rows[0].status) === 'CANCELLED') {
+        return
+      }
+
+      const movementResult = await client.query(
+        `
+          SELECT id, material_batch_id, material_id, quantity, unit_cost, moved_at
+          FROM stock_movements
+          WHERE plant_id = $1
+            AND warehouse_id = $2
+            AND reference_type = $3
+            AND reference_id = $4
+            AND direction = $5
+          ORDER BY moved_at ASC
+        `,
+        [
+          auth.plantId,
+          payload.warehouseId,
+          payload.referenceType,
+          payload.referenceId,
+          payload.referenceType === 'PURCHASE_RECEIPT' ? 1 : -1
+        ]
+      )
+
+      if (!movementResult.rowCount || movementResult.rowCount === 0) {
+        throw new NotFoundError('Inventory action')
+      }
+
+      for (const movement of movementResult.rows) {
+        const batchId = movement.material_batch_id ? String(movement.material_batch_id) : null
+        if (!batchId) {
+          continue
+        }
+        const quantity = Number(movement.quantity)
+
+        const batchResult = await client.query(
+          `
+            SELECT qty_available
+            FROM material_batches
+            WHERE id = $1
+            FOR UPDATE
+          `,
+          [batchId]
+        )
+        if (!batchResult.rowCount || batchResult.rowCount === 0) {
+          throw new NotFoundError('Material batch')
+        }
+        const qtyAvailable = Number(batchResult.rows[0].qty_available)
+
+        if (payload.referenceType === 'PURCHASE_RECEIPT') {
+          if (qtyAvailable < quantity) {
+            throw new ConflictError('Không thể huỷ phiếu nhập vì lô đã được sử dụng một phần')
+          }
+          await client.query(
+            `
+              UPDATE material_batches
+              SET qty_available = qty_available - $2
+              WHERE id = $1
+            `,
+            [batchId, quantity]
+          )
+          await client.query(
+            `
+              INSERT INTO stock_movements (
+                id, plant_id, warehouse_id, material_id, material_batch_id, movement_type, direction, quantity, unit_cost,
+                reference_type, reference_id, moved_at, created_at
+              )
+              VALUES (
+                gen_random_uuid(), $1, $2, $3, $4, 'ADJUSTMENT_MINUS', -1, $5, $6, 'RECEIPT_CANCEL', $7, now(), now()
+              )
+            `,
+            [auth.plantId, payload.warehouseId, String(movement.material_id), batchId, quantity, Number(movement.unit_cost), payload.referenceId]
+          )
+          continue
+        }
+
+        await client.query(
+          `
+            UPDATE material_batches
+            SET qty_available = qty_available + $2
+            WHERE id = $1
+          `,
+          [batchId, quantity]
+        )
+        await client.query(
+          `
+            INSERT INTO stock_movements (
+              id, plant_id, warehouse_id, material_id, material_batch_id, movement_type, direction, quantity, unit_cost,
+              reference_type, reference_id, moved_at, created_at
+            )
+            VALUES (
+              gen_random_uuid(), $1, $2, $3, $4, 'ADJUSTMENT_PLUS', 1, $5, $6, $7, $8, now(), now()
+            )
+          `,
+          [
+            auth.plantId,
+            payload.warehouseId,
+            String(movement.material_id),
+            batchId,
+            quantity,
+            Number(movement.unit_cost),
+            `${payload.referenceType}_CANCEL`,
+            payload.referenceId
+          ]
+        )
+      }
+
+      await client.query(
+        `
+          INSERT INTO inventory_action_statuses (
+            plant_id, warehouse_id, reference_type, reference_id, status, reason, cancelled_by, cancelled_at, created_at, updated_at
+          )
+          VALUES ($1, $2, $3, $4, 'CANCELLED', $5, $6, now(), now(), now())
+          ON CONFLICT (plant_id, warehouse_id, reference_type, reference_id)
+          DO UPDATE
+          SET status = 'CANCELLED',
+              reason = EXCLUDED.reason,
+              cancelled_by = EXCLUDED.cancelled_by,
+              cancelled_at = now(),
+              updated_at = now()
+        `,
+        [auth.plantId, payload.warehouseId, payload.referenceType, payload.referenceId, payload.reason ?? null, auth.userId]
+      )
+    })
+
+    return response.json(toSuccessResponse({
+      referenceId: payload.referenceId,
+      referenceType: payload.referenceType,
+      status: 'CANCELLED',
+      statusLabel: getActionStatusLabel('CANCELLED')
+    }))
+  }))
+
   router.get('/inventory/ledger', asyncHandler(async (request, response) => {
     const auth = await getAuthContext(request)
     const schema = z.object({
@@ -1012,6 +1425,63 @@ export const createRouter = (dependencies: RouterDependencies) => {
       name: String(row.finished_good_name),
       uom: String(row.finished_good_uom),
       quantityOnHand: Number(row.quantity_on_hand)
+    }))))
+  }))
+
+  router.get('/inventory/finished-goods/issues', asyncHandler(async (request, response) => {
+    const auth = await getAuthContext(request)
+    const schema = z.object({
+      warehouseId: idSchema
+    })
+    const query = schema.parse(request.query)
+    requireWarehouseAccess(auth, query.warehouseId)
+    await ensureInventoryActionStatusesTable(pool)
+
+    const result = await pool.query(
+      `
+        SELECT
+          sm.id,
+          sm.finished_good_id,
+          fg.code,
+          fg.name,
+          fg.uom,
+          sm.quantity,
+          sm.unit_cost,
+          sm.moved_at,
+          sm.reference_type,
+          sm.reference_id::text AS reference_id,
+          COALESCE(ias.status, 'ACTIVE') AS status
+        FROM stock_movements sm
+        INNER JOIN finished_goods fg ON fg.id = sm.finished_good_id
+        LEFT JOIN inventory_action_statuses ias
+          ON ias.plant_id = sm.plant_id
+         AND ias.warehouse_id = sm.warehouse_id
+         AND ias.reference_type = sm.reference_type
+         AND ias.reference_id = sm.reference_id::text
+        WHERE sm.plant_id = $1
+          AND sm.warehouse_id = $2
+          AND sm.finished_good_id IS NOT NULL
+          AND sm.direction = -1
+          AND sm.reference_type LIKE 'FG_MANUAL_ISSUE%'
+        ORDER BY sm.moved_at DESC
+      `,
+      [auth.plantId, query.warehouseId]
+    )
+
+    return response.json(toSuccessResponse(result.rows.map((row) => ({
+      id: String(row.id),
+      finishedGoodId: String(row.finished_good_id),
+      code: String(row.code),
+      name: String(row.name),
+      uom: String(row.uom),
+      quantity: Number(row.quantity),
+      unitCost: Number(row.unit_cost),
+      movedAt: new Date(String(row.moved_at)).toISOString(),
+      referenceType: String(row.reference_type),
+      referenceTypeLabel: getReferenceTypeLabel(String(row.reference_type)),
+      referenceId: String(row.reference_id),
+      status: String(row.status),
+      statusLabel: getActionStatusLabel(String(row.status))
     }))))
   }))
 
@@ -1140,6 +1610,107 @@ export const createRouter = (dependencies: RouterDependencies) => {
     })))
   }))
 
+  router.post('/inventory/finished-goods/issues/cancel', asyncHandler(async (request, response) => {
+    const auth = await getAuthContext(request)
+    requirePermission(auth, 'inventory.cancel')
+    const schema = z.object({
+      warehouseId: idSchema,
+      referenceType: z.string().min(1),
+      referenceId: z.string().min(1),
+      reason: z.string().optional()
+    })
+    const payload = schema.parse(request.body)
+    requireWarehouseAccess(auth, payload.warehouseId)
+    await ensureInventoryActionStatusesTable(pool)
+
+    await withTransaction(pool, async (client) => {
+      const currentStatusResult = await client.query(
+        `
+          SELECT status
+          FROM inventory_action_statuses
+          WHERE plant_id = $1
+            AND warehouse_id = $2
+            AND reference_type = $3
+            AND reference_id = $4
+          LIMIT 1
+        `,
+        [auth.plantId, payload.warehouseId, payload.referenceType, payload.referenceId]
+      )
+
+      if (currentStatusResult.rowCount && String(currentStatusResult.rows[0].status) === 'CANCELLED') {
+        return
+      }
+
+      const issueRows = await client.query(
+        `
+          SELECT id, finished_good_id, quantity, unit_cost
+          FROM stock_movements
+          WHERE plant_id = $1
+            AND warehouse_id = $2
+            AND reference_type = $3
+            AND reference_id = $4
+            AND finished_good_id IS NOT NULL
+            AND direction = -1
+          FOR UPDATE
+        `,
+        [auth.plantId, payload.warehouseId, payload.referenceType, payload.referenceId]
+      )
+
+      if (!issueRows.rowCount || issueRows.rowCount === 0) {
+        throw new NotFoundError('Finished good issue')
+      }
+
+      for (const row of issueRows.rows) {
+        await client.query(
+          `
+            INSERT INTO stock_movements (
+              id, plant_id, warehouse_id, finished_good_id,
+              movement_type, direction, quantity, unit_cost,
+              reference_type, reference_id, moved_at, created_at
+            )
+            VALUES (
+              gen_random_uuid(), $1, $2, $3,
+              'RECEIPT', 1, $4, $5,
+              'FG_ISSUE_CANCEL', $6, now(), now()
+            )
+          `,
+          [
+            auth.plantId,
+            payload.warehouseId,
+            String(row.finished_good_id),
+            Number(row.quantity),
+            Number(row.unit_cost),
+            payload.referenceId
+          ]
+        )
+      }
+
+      await client.query(
+        `
+          INSERT INTO inventory_action_statuses (
+            plant_id, warehouse_id, reference_type, reference_id, status, reason, cancelled_by, cancelled_at, created_at, updated_at
+          )
+          VALUES ($1, $2, $3, $4, 'CANCELLED', $5, $6, now(), now(), now())
+          ON CONFLICT (plant_id, warehouse_id, reference_type, reference_id)
+          DO UPDATE
+          SET status = 'CANCELLED',
+              reason = EXCLUDED.reason,
+              cancelled_by = EXCLUDED.cancelled_by,
+              cancelled_at = now(),
+              updated_at = now()
+        `,
+        [auth.plantId, payload.warehouseId, payload.referenceType, payload.referenceId, payload.reason ?? null, auth.userId]
+      )
+    })
+
+    return response.json(toSuccessResponse({
+      referenceType: payload.referenceType,
+      referenceId: payload.referenceId,
+      status: 'CANCELLED',
+      statusLabel: getActionStatusLabel('CANCELLED')
+    }))
+  }))
+
   router.get('/master/materials', asyncHandler(async (request, response) => {
     const auth = await getAuthContext(request)
     const result = await pool.query(
@@ -1184,9 +1755,10 @@ export const createRouter = (dependencies: RouterDependencies) => {
 
   router.get('/master/finished-goods', asyncHandler(async (request, response) => {
     const auth = await getAuthContext(request)
+    await ensureFinishedGoodsUnitPriceColumn(pool)
     const result = await pool.query(
       `
-        SELECT id, code, name, uom, is_active
+        SELECT id, code, name, uom, unit_price, is_active
         FROM finished_goods
         WHERE plant_id = $1
         ORDER BY code ASC
@@ -1199,6 +1771,7 @@ export const createRouter = (dependencies: RouterDependencies) => {
       code: String(row.code),
       name: String(row.name),
       uom: String(row.uom),
+      unitPrice: Number(row.unit_price),
       isActive: Boolean(row.is_active)
     }))))
   }))
@@ -1206,6 +1779,7 @@ export const createRouter = (dependencies: RouterDependencies) => {
   router.get('/master/recipes', asyncHandler(async (request, response) => {
     const auth = await getAuthContext(request)
     requirePermission(auth, 'recipe.view')
+    await ensureFinishedGoodsUnitPriceColumn(pool)
     const result = await pool.query(
       `
         SELECT
@@ -1215,6 +1789,8 @@ export const createRouter = (dependencies: RouterDependencies) => {
           COALESCE(fg.name, fg.code) AS name,
           fg.code AS product_code,
           fg.name AS product_name,
+          fg.uom AS product_uom,
+          fg.unit_price AS product_unit_price,
           fg.is_active AS product_is_active
         FROM recipes r
         LEFT JOIN finished_goods fg ON fg.id = r.finished_good_id
@@ -1231,6 +1807,8 @@ export const createRouter = (dependencies: RouterDependencies) => {
       name: String(row.name),
       productCode: row.product_code ? String(row.product_code) : '',
       productName: row.product_name ? String(row.product_name) : '',
+      productUom: row.product_uom ? String(row.product_uom) : '',
+      productUnitPrice: Number(row.product_unit_price ?? 0),
       productIsActive: Boolean(row.product_is_active)
     }))))
   }))
@@ -1352,6 +1930,178 @@ export const createRouter = (dependencies: RouterDependencies) => {
     return response.json(toSuccessResponse(summary))
   }))
 
+  router.get('/reports/inventory-detail', asyncHandler(async (request, response) => {
+    const auth = await getAuthContext(request)
+    const schema = z.object({
+      monthKey: z.string().regex(/^\d{4}-\d{2}$/),
+      warehouseId: idSchema
+    })
+    const query = schema.parse(request.query)
+    const range = getMonthRangeFromMonthKey(query.monthKey)
+
+    const materialSummaryResult = await pool.query(
+      `
+        SELECT
+          m.id AS material_id,
+          m.code,
+          m.name,
+          m.uom,
+          COALESCE(SUM(CASE WHEN sm.moved_at >= $3::timestamptz AND sm.moved_at < $4::timestamptz AND sm.direction = 1 THEN sm.quantity ELSE 0 END), 0) AS period_receipt_qty,
+          COALESCE(SUM(CASE WHEN sm.moved_at >= $3::timestamptz AND sm.moved_at < $4::timestamptz AND sm.direction = -1 AND sm.movement_type <> 'DISPOSAL' THEN sm.quantity ELSE 0 END), 0) AS period_issue_qty,
+          COALESCE(SUM(CASE WHEN sm.moved_at >= $3::timestamptz AND sm.moved_at < $4::timestamptz AND sm.movement_type = 'DISPOSAL' THEN sm.quantity ELSE 0 END), 0) AS period_disposal_qty,
+          COALESCE(SUM(CASE WHEN sm.direction = 1 THEN sm.quantity WHEN sm.direction = -1 THEN -sm.quantity ELSE 0 END), 0) AS on_hand_qty
+        FROM materials m
+        LEFT JOIN stock_movements sm
+          ON sm.material_id = m.id
+          AND sm.warehouse_id = $2
+          AND sm.plant_id = $1
+        WHERE m.plant_id = $1
+        GROUP BY m.id, m.code, m.name, m.uom
+        ORDER BY m.code ASC
+      `,
+      [auth.plantId, query.warehouseId, range.from, range.to]
+    )
+
+    const finishedGoodSummaryResult = await pool.query(
+      `
+        SELECT
+          fg.id AS finished_good_id,
+          fg.code,
+          fg.name,
+          fg.uom,
+          COALESCE(SUM(CASE WHEN sm.moved_at >= $3::timestamptz AND sm.moved_at < $4::timestamptz AND sm.direction = 1 THEN sm.quantity ELSE 0 END), 0) AS period_receipt_qty,
+          COALESCE(SUM(CASE WHEN sm.moved_at >= $3::timestamptz AND sm.moved_at < $4::timestamptz AND sm.direction = -1 THEN sm.quantity ELSE 0 END), 0) AS period_issue_qty,
+          COALESCE(SUM(CASE WHEN sm.direction = 1 THEN sm.quantity WHEN sm.direction = -1 THEN -sm.quantity ELSE 0 END), 0) AS on_hand_qty
+        FROM finished_goods fg
+        LEFT JOIN stock_movements sm
+          ON sm.finished_good_id = fg.id
+          AND sm.warehouse_id = $2
+          AND sm.plant_id = $1
+        WHERE fg.plant_id = $1
+        GROUP BY fg.id, fg.code, fg.name, fg.uom
+        ORDER BY fg.code ASC
+      `,
+      [auth.plantId, query.warehouseId, range.from, range.to]
+    )
+
+    return response.json(toSuccessResponse({
+      monthKey: query.monthKey,
+      warehouseId: query.warehouseId,
+      materials: materialSummaryResult.rows.map((row) => ({
+        materialId: String(row.material_id),
+        code: String(row.code),
+        name: String(row.name),
+        uom: String(row.uom),
+        periodReceiptQty: Number(row.period_receipt_qty),
+        periodIssueQty: Number(row.period_issue_qty),
+        periodDisposalQty: Number(row.period_disposal_qty),
+        onHandQty: Number(row.on_hand_qty)
+      })),
+      finishedGoods: finishedGoodSummaryResult.rows.map((row) => ({
+        finishedGoodId: String(row.finished_good_id),
+        code: String(row.code),
+        name: String(row.name),
+        uom: String(row.uom),
+        periodReceiptQty: Number(row.period_receipt_qty),
+        periodIssueQty: Number(row.period_issue_qty),
+        onHandQty: Number(row.on_hand_qty)
+      }))
+    }))
+  }))
+
+  router.get('/reports/material-price-trend', asyncHandler(async (request, response) => {
+    const auth = await getAuthContext(request)
+    const schema = z.object({
+      warehouseId: idSchema,
+      periodType: z.enum(['week', 'month']),
+      fromDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      toDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+    })
+    const query = schema.parse(request.query)
+    const range = getDateRangeFromDayKeys(query.fromDate, query.toDate)
+
+    const result = await pool.query(
+      `
+        SELECT
+          m.id AS material_id,
+          m.code,
+          m.name,
+          CASE
+            WHEN $5::text = 'week'
+              THEN to_char(date_trunc('week', pr.received_at), 'IYYY-"W"IW')
+            ELSE to_char(date_trunc('month', pr.received_at), 'YYYY-MM')
+          END AS period_key,
+          date_trunc(CASE WHEN $5::text = 'week' THEN 'week' ELSE 'month' END, pr.received_at) AS period_start,
+          ROUND(AVG(pri.unit_price)::numeric, 2) AS avg_unit_price,
+          ROUND(MIN(pri.unit_price)::numeric, 2) AS min_unit_price,
+          ROUND(MAX(pri.unit_price)::numeric, 2) AS max_unit_price,
+          COUNT(pri.id)::int AS sample_count
+        FROM purchase_receipts pr
+        INNER JOIN purchase_receipt_items pri ON pri.receipt_id = pr.id
+        INNER JOIN materials m ON m.id = pri.material_id
+        WHERE pr.plant_id = $1
+          AND pr.warehouse_id = $2
+          AND pr.received_at >= $3::timestamptz
+          AND pr.received_at < $4::timestamptz
+        GROUP BY m.id, m.code, m.name, period_key, period_start
+        ORDER BY m.code ASC, period_start ASC
+      `,
+      [auth.plantId, query.warehouseId, range.from, range.to, query.periodType]
+    )
+
+    const periodsMap = new Map<string, { periodKey: string, periodStart: string }>()
+    const materialsMap = new Map<string, {
+      materialId: string
+      code: string
+      name: string
+      points: Array<{
+        periodKey: string
+        periodStart: string
+        avgUnitPrice: number
+        minUnitPrice: number
+        maxUnitPrice: number
+        sampleCount: number
+      }>
+    }>()
+
+    for (const row of result.rows) {
+      const periodKey = String(row.period_key)
+      const periodStart = new Date(String(row.period_start)).toISOString()
+      periodsMap.set(periodKey, { periodKey, periodStart })
+
+      const materialId = String(row.material_id)
+      if (!materialsMap.has(materialId)) {
+        materialsMap.set(materialId, {
+          materialId,
+          code: String(row.code),
+          name: String(row.name),
+          points: []
+        })
+      }
+
+      materialsMap.get(materialId)?.points.push({
+        periodKey,
+        periodStart,
+        avgUnitPrice: Number(row.avg_unit_price),
+        minUnitPrice: Number(row.min_unit_price),
+        maxUnitPrice: Number(row.max_unit_price),
+        sampleCount: Number(row.sample_count)
+      })
+    }
+
+    const periods = Array.from(periodsMap.values()).sort((a, b) => a.periodStart.localeCompare(b.periodStart))
+    const materials = Array.from(materialsMap.values())
+
+    return response.json(toSuccessResponse({
+      warehouseId: query.warehouseId,
+      periodType: query.periodType,
+      fromDate: query.fromDate,
+      toDate: query.toDate,
+      periods,
+      materials
+    }))
+  }))
+
   router.post('/reports/monthly-snapshot/rebuild', asyncHandler(async (request, response) => {
     const auth = await getAuthContext(request)
     const schema = z.object({
@@ -1396,6 +2146,7 @@ export const createRouter = (dependencies: RouterDependencies) => {
   router.get('/admin/roles', asyncHandler(async (request, response) => {
     const auth = await getAuthContext(request)
     requirePermission(auth, 'user.manage')
+    await ensurePermissionCatalog(pool)
     const result = await pool.query(
       `
         SELECT
@@ -1419,9 +2170,177 @@ export const createRouter = (dependencies: RouterDependencies) => {
     }))))
   }))
 
+  router.post('/admin/roles', asyncHandler(async (request, response) => {
+    const auth = await getAuthContext(request)
+    requirePermission(auth, 'user.manage')
+    await ensurePermissionCatalog(pool)
+    const schema = z.object({
+      code: z.string().min(2),
+      name: z.string().min(2),
+      permissionCodes: z.array(z.string().min(1)).min(1)
+    })
+    const payload = schema.parse(request.body)
+    const normalizedCode = payload.code.trim().toUpperCase()
+    const normalizedName = payload.name.trim()
+    const uniquePermissionCodes = Array.from(new Set(payload.permissionCodes.map((value) => value.trim()).filter(Boolean)))
+
+    const createdRole = await withTransaction(pool, async (client) => {
+      const existingRole = await client.query(
+        `
+          SELECT id
+          FROM roles
+          WHERE code = $1
+          LIMIT 1
+        `,
+        [normalizedCode]
+      )
+
+      if (existingRole.rowCount && existingRole.rowCount > 0) {
+        throw new ConflictError('Mã vai trò đã tồn tại')
+      }
+
+      const permissionResult = await client.query(
+        `
+          SELECT id, code
+          FROM permissions
+          WHERE code = ANY($1::text[])
+        `,
+        [uniquePermissionCodes]
+      )
+
+      const resolvedCodes = new Set(permissionResult.rows.map((row) => String(row.code)))
+      const missingCodes = uniquePermissionCodes.filter((code) => !resolvedCodes.has(code))
+      if (missingCodes.length > 0) {
+        throw new ValidationError(`Không tìm thấy quyền: ${missingCodes.join(', ')}`)
+      }
+
+      const roleResult = await client.query(
+        `
+          INSERT INTO roles (id, code, name, created_at)
+          VALUES (gen_random_uuid(), $1, $2, now())
+          RETURNING id, code, name
+        `,
+        [normalizedCode, normalizedName]
+      )
+
+      const roleId = String(roleResult.rows[0].id)
+      for (const row of permissionResult.rows) {
+        await client.query(
+          `
+            INSERT INTO role_permissions (role_id, permission_id)
+            VALUES ($1, $2)
+          `,
+          [roleId, String(row.id)]
+        )
+      }
+
+      return {
+        id: roleId,
+        code: String(roleResult.rows[0].code),
+        name: String(roleResult.rows[0].name),
+        permissions: uniquePermissionCodes
+      }
+    })
+
+    return response.status(201).json(toSuccessResponse(createdRole))
+  }))
+
+  router.put('/admin/roles/:id/permissions', asyncHandler(async (request, response) => {
+    const auth = await getAuthContext(request)
+    requirePermission(auth, 'user.manage')
+    await ensurePermissionCatalog(pool)
+    const schema = z.object({
+      permissionCodes: z.array(z.string().min(1)).min(1)
+    })
+    const payload = schema.parse(request.body)
+    const uniquePermissionCodes = Array.from(new Set(payload.permissionCodes.map((value) => value.trim()).filter(Boolean)))
+
+    const updatedRole = await withTransaction(pool, async (client) => {
+      const roleResult = await client.query(
+        `
+          SELECT id, code, name
+          FROM roles
+          WHERE id = $1
+          LIMIT 1
+        `,
+        [String(request.params.id)]
+      )
+
+      if (!roleResult.rowCount || roleResult.rowCount === 0) {
+        throw new NotFoundError('Role')
+      }
+      const roleCode = String(roleResult.rows[0].code).toUpperCase()
+      if (SYSTEM_ROLE_CODES.has(roleCode)) {
+        throw new ForbiddenError(`Không được chỉnh sửa quyền vai trò hệ thống: ${roleCode}`)
+      }
+
+      const permissionResult = await client.query(
+        `
+          SELECT id, code
+          FROM permissions
+          WHERE code = ANY($1::text[])
+        `,
+        [uniquePermissionCodes]
+      )
+
+      const resolvedCodes = new Set(permissionResult.rows.map((row) => String(row.code)))
+      const missingCodes = uniquePermissionCodes.filter((code) => !resolvedCodes.has(code))
+      if (missingCodes.length > 0) {
+        throw new ValidationError(`Không tìm thấy quyền: ${missingCodes.join(', ')}`)
+      }
+
+      await client.query(
+        `
+          DELETE FROM role_permissions
+          WHERE role_id = $1
+        `,
+        [String(request.params.id)]
+      )
+
+      for (const row of permissionResult.rows) {
+        await client.query(
+          `
+            INSERT INTO role_permissions (role_id, permission_id)
+            VALUES ($1, $2)
+          `,
+          [String(request.params.id), String(row.id)]
+        )
+      }
+
+      return {
+        id: String(roleResult.rows[0].id),
+        code: String(roleResult.rows[0].code),
+        name: String(roleResult.rows[0].name),
+        permissions: uniquePermissionCodes
+      }
+    })
+
+    return response.json(toSuccessResponse(updatedRole))
+  }))
+
+  router.get('/admin/permissions', asyncHandler(async (request, response) => {
+    const auth = await getAuthContext(request)
+    requirePermission(auth, 'user.manage')
+    await ensurePermissionCatalog(pool)
+    const result = await pool.query(
+      `
+        SELECT id, code, description
+        FROM permissions
+        ORDER BY code ASC
+      `
+    )
+
+    return response.json(toSuccessResponse(result.rows.map((row) => ({
+      id: String(row.id),
+      code: String(row.code),
+      description: String(row.description)
+    }))))
+  }))
+
   router.get('/admin/users', asyncHandler(async (request, response) => {
     const auth = await getAuthContext(request)
     requirePermission(auth, 'user.manage')
+    await ensureUserPermissionsTable(pool)
     const result = await pool.query(
       `
         SELECT
@@ -1440,13 +2359,20 @@ export const createRouter = (dependencies: RouterDependencies) => {
               )
             ) FILTER (WHERE r.id IS NOT NULL),
             '[]'::json
-          ) AS assignments
+          ) AS assignments,
+          COALESCE(
+            array_agg(DISTINCT p.code) FILTER (WHERE p.code IS NOT NULL),
+            '{}'
+          ) AS direct_permissions
         FROM users u
         LEFT JOIN user_roles ur ON ur.user_id = u.id
         LEFT JOIN roles r ON r.id = ur.role_id
+        LEFT JOIN user_permissions up ON up.user_id = u.id AND (up.plant_id IS NULL OR up.plant_id = $1)
+        LEFT JOIN permissions p ON p.id = up.permission_id
         GROUP BY u.id, u.email, u.full_name, u.is_active
         ORDER BY u.created_at DESC
-      `
+      `,
+      [auth.plantId]
     )
 
     return response.json(toSuccessResponse(result.rows.map((row) => ({
@@ -1454,7 +2380,10 @@ export const createRouter = (dependencies: RouterDependencies) => {
       email: String(row.email),
       fullName: String(row.full_name),
       isActive: Boolean(row.is_active),
-      assignments: Array.isArray(row.assignments) ? row.assignments : []
+      assignments: Array.isArray(row.assignments) ? row.assignments : [],
+      directPermissions: Array.isArray(row.direct_permissions)
+        ? row.direct_permissions.map((value: unknown) => String(value))
+        : []
     }))))
   }))
 
@@ -1483,6 +2412,50 @@ export const createRouter = (dependencies: RouterDependencies) => {
       email: String(created.email),
       fullName: String(created.full_name),
       isActive: Boolean(created.is_active)
+    }))
+  }))
+
+  router.put('/admin/users/:id', asyncHandler(async (request, response) => {
+    const auth = await getAuthContext(request)
+    requirePermission(auth, 'user.manage')
+    const schema = z.object({
+      email: z.string().email().optional(),
+      fullName: z.string().min(1).optional(),
+      isActive: z.boolean().optional()
+    }).refine(
+      (value) => value.email !== undefined || value.fullName !== undefined || value.isActive !== undefined,
+      { message: 'Vui lòng cung cấp ít nhất một trường để cập nhật' }
+    )
+    const payload = schema.parse(request.body)
+
+    const result = await pool.query(
+      `
+        UPDATE users
+        SET email = COALESCE($2, email),
+            full_name = COALESCE($3, full_name),
+            is_active = COALESCE($4, is_active),
+            updated_at = now()
+        WHERE id = $1
+        RETURNING id, email, full_name, is_active
+      `,
+      [
+        String(request.params.id),
+        payload.email ?? null,
+        payload.fullName ?? null,
+        payload.isActive ?? null
+      ]
+    )
+
+    if (result.rowCount === 0) {
+      throw new NotFoundError('User')
+    }
+
+    const updated = result.rows[0]
+    return response.json(toSuccessResponse({
+      id: String(updated.id),
+      email: String(updated.email),
+      fullName: String(updated.full_name),
+      isActive: Boolean(updated.is_active)
     }))
   }))
 
@@ -1517,6 +2490,53 @@ export const createRouter = (dependencies: RouterDependencies) => {
             assignment.plantId ?? auth.plantId,
             resolvedWarehouseId
           ]
+        )
+      }
+    })
+
+    return response.json(toSuccessResponse({ userId: String(request.params.id), updated: true }))
+  }))
+
+  router.put('/admin/users/:id/permissions', asyncHandler(async (request, response) => {
+    const auth = await getAuthContext(request)
+    requirePermission(auth, 'user.manage')
+    await ensureUserPermissionsTable(pool)
+    const schema = z.object({
+      permissions: z.array(z.string().min(1))
+    })
+    const payload = schema.parse(request.body)
+    const permissionCodes = Array.from(new Set(payload.permissions.map((value) => value.trim()).filter(Boolean)))
+
+    await withTransaction(pool, async (client) => {
+      await client.query(
+        `
+          DELETE FROM user_permissions
+          WHERE user_id = $1
+            AND (plant_id IS NULL OR plant_id = $2)
+        `,
+        [String(request.params.id), auth.plantId]
+      )
+
+      if (permissionCodes.length === 0) {
+        return
+      }
+
+      const permissionResult = await client.query(
+        `
+          SELECT id
+          FROM permissions
+          WHERE code = ANY($1::text[])
+        `,
+        [permissionCodes]
+      )
+
+      for (const row of permissionResult.rows) {
+        await client.query(
+          `
+            INSERT INTO user_permissions (user_id, permission_id, plant_id, warehouse_id)
+            VALUES ($1, $2, $3, $4)
+          `,
+          [String(request.params.id), String(row.id), auth.plantId, auth.warehouseIds[0] ?? null]
         )
       }
     })

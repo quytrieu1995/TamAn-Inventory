@@ -69,7 +69,7 @@ export const createFinishedGoodsService = ({
       orderId: string
     }
   ) => {
-    requirePermission(auth, 'production.create')
+    requirePermission(auth, 'production.approve')
     const order = await productionRepository.getProductionOrderById(input.orderId)
     if (!order) {
       throw new NotFoundError('Production order')

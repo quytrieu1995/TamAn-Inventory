@@ -45,6 +45,12 @@
       "namedRegex": "^/finished\\-goods(?:/)?$"
     },
     {
+      "page": "/login",
+      "regex": "^/login(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/login(?:/)?$"
+    },
+    {
       "page": "/materials",
       "regex": "^/materials(?:/)?$",
       "routeKeys": {},

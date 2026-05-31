@@ -138,6 +138,62 @@ export type MonthlySummary = {
   movementCount: number
 }
 
+export type MaterialInventoryDetailRow = {
+  materialId: string
+  code: string
+  name: string
+  uom: string
+  periodReceiptQty: number
+  periodIssueQty: number
+  periodDisposalQty: number
+  onHandQty: number
+}
+
+export type FinishedGoodInventoryDetailRow = {
+  finishedGoodId: string
+  code: string
+  name: string
+  uom: string
+  periodReceiptQty: number
+  periodIssueQty: number
+  onHandQty: number
+}
+
+export type InventoryDetailReport = {
+  monthKey: string
+  warehouseId: string
+  materials: MaterialInventoryDetailRow[]
+  finishedGoods: FinishedGoodInventoryDetailRow[]
+}
+
+export type MaterialPriceTrendPoint = {
+  periodKey: string
+  periodStart: string
+  avgUnitPrice: number
+  minUnitPrice: number
+  maxUnitPrice: number
+  sampleCount: number
+}
+
+export type MaterialPriceTrendSeries = {
+  materialId: string
+  code: string
+  name: string
+  points: MaterialPriceTrendPoint[]
+}
+
+export type MaterialPriceTrendReport = {
+  warehouseId: string
+  periodType: 'week' | 'month'
+  fromDate: string
+  toDate: string
+  periods: Array<{
+    periodKey: string
+    periodStart: string
+  }>
+  materials: MaterialPriceTrendSeries[]
+}
+
 export type SessionInfo = {
   userId: string
   plantId: string
@@ -172,6 +228,7 @@ export type MasterFinishedGood = {
   code: string
   name: string
   uom: string
+  unitPrice: number
   isActive: boolean
 }
 
@@ -182,6 +239,8 @@ export type MasterRecipe = {
   name: string
   productCode: string
   productName: string
+  productUom: string
+  productUnitPrice: number
   productIsActive: boolean
 }
 
@@ -218,6 +277,8 @@ export type SupplierReceiptRow = {
   receivedAt: string
   note: string
   warehouseId: string
+  status: string
+  statusLabel: string
   itemCount: number
   totalQuantity: number
   totalAmount: number
@@ -234,6 +295,8 @@ export type PurchaseReceiptDetail = {
   receivedAt: string
   note: string
   warehouseId: string
+  status: string
+  statusLabel: string
   supplier: {
     id: string
     code: string
@@ -273,6 +336,33 @@ export type FinishedGoodStockRow = {
   quantityOnHand: number
 }
 
+export type FinishedGoodIssueRow = {
+  id: string
+  finishedGoodId: string
+  code: string
+  name: string
+  uom: string
+  quantity: number
+  unitCost: number
+  movedAt: string
+  referenceType: string
+  referenceTypeLabel: string
+  referenceId: string
+  status: string
+  statusLabel: string
+}
+
+export type InventoryActionRow = {
+  referenceId: string
+  referenceType: 'PURCHASE_RECEIPT' | 'MANUAL_ISSUE' | 'DISPOSAL'
+  actionType: 'RECEIPT' | 'ISSUE' | 'DISPOSAL'
+  documentNo: string
+  movedAt: string
+  totalQuantity: number
+  status: string
+  statusLabel: string
+}
+
 export type AdminRole = {
   id: string
   code: string
@@ -292,6 +382,13 @@ export type AdminUser = {
     plantId: string | null
     warehouseId: string | null
   }>
+  directPermissions: string[]
+}
+
+export type AdminPermission = {
+  id: string
+  code: string
+  description: string
 }
 
 export const apiClient = {
@@ -318,6 +415,18 @@ export const apiClient = {
   },
   getMonthlySummary: (monthKey: string) => {
     return requestJson<MonthlySummary>(`/reports/monthly?warehouseId=${DEFAULT_WAREHOUSE_ID}&monthKey=${monthKey}`)
+  },
+  getInventoryDetailReport: (monthKey: string) => {
+    return requestJson<InventoryDetailReport>(`/reports/inventory-detail?warehouseId=${DEFAULT_WAREHOUSE_ID}&monthKey=${monthKey}`)
+  },
+  getMaterialPriceTrendReport: (input: { periodType: 'week' | 'month', fromDate: string, toDate: string }) => {
+    const query = new URLSearchParams({
+      warehouseId: DEFAULT_WAREHOUSE_ID,
+      periodType: input.periodType,
+      fromDate: input.fromDate,
+      toDate: input.toDate
+    })
+    return requestJson<MaterialPriceTrendReport>(`/reports/material-price-trend?${query.toString()}`)
   },
   getMaterialsMaster: () => {
     return requestJson<MasterMaterial[]>('/master/materials')
@@ -350,6 +459,18 @@ export const apiClient = {
   },
   getFinishedGoodStocks: () => {
     return requestJson<FinishedGoodStockRow[]>(`/inventory/finished-goods/stocks?warehouseId=${DEFAULT_WAREHOUSE_ID}`)
+  },
+  getFinishedGoodIssues: () => {
+    return requestJson<FinishedGoodIssueRow[]>(`/inventory/finished-goods/issues?warehouseId=${DEFAULT_WAREHOUSE_ID}`)
+  },
+  cancelFinishedGoodIssue: (input: { referenceType: string, referenceId: string, reason?: string }) => {
+    return requestJson<{ status: string, statusLabel: string }>('/inventory/finished-goods/issues/cancel', {
+      method: 'POST',
+      body: JSON.stringify({
+        warehouseId: DEFAULT_WAREHOUSE_ID,
+        ...input
+      })
+    })
   },
   createFinishedGoodReceipt: (input: {
     warehouseId: string
@@ -436,6 +557,22 @@ export const apiClient = {
       body: JSON.stringify(input)
     })
   },
+  getInventoryActions: () => {
+    return requestJson<InventoryActionRow[]>(`/inventory/actions?warehouseId=${DEFAULT_WAREHOUSE_ID}`)
+  },
+  cancelInventoryAction: (input: {
+    referenceType: 'PURCHASE_RECEIPT' | 'DISPOSAL'
+    referenceId: string
+    reason?: string
+  }) => {
+    return requestJson<{ status: string, statusLabel: string }>('/inventory/actions/cancel', {
+      method: 'POST',
+      body: JSON.stringify({
+        warehouseId: DEFAULT_WAREHOUSE_ID,
+        ...input
+      })
+    })
+  },
   createProductionOrder: (input: {
     warehouseId: string
     orderNo: string
@@ -477,6 +614,7 @@ export const apiClient = {
       code: string
       name: string
       uom: string
+      unitPrice: number
     }
     items: Array<{
       materialId: string
@@ -491,6 +629,8 @@ export const apiClient = {
   updateRecipe: (recipeId: string, input: {
     name: string
     productName?: string
+    productUom?: string
+    productUnitPrice?: number
     items: Array<{
       materialId: string
       qtyPerUnit: number
@@ -568,10 +708,31 @@ export const apiClient = {
   getAdminUsers: () => {
     return requestJson<AdminUser[]>('/admin/users')
   },
+  getAdminPermissions: () => {
+    return requestJson<AdminPermission[]>('/admin/permissions')
+  },
   createAdminUser: (input: { email: string, fullName: string, password?: string }) => {
     return requestJson<AdminUser>('/admin/users', {
       method: 'POST',
       body: JSON.stringify(input)
+    })
+  },
+  updateAdminUser: (userId: string, input: { email?: string, fullName?: string, isActive?: boolean }) => {
+    return requestJson<AdminUser>(`/admin/users/${userId}`, {
+      method: 'PUT',
+      body: JSON.stringify(input)
+    })
+  },
+  createAdminRole: (input: { code: string, name: string, permissionCodes: string[] }) => {
+    return requestJson<AdminRole>('/admin/roles', {
+      method: 'POST',
+      body: JSON.stringify(input)
+    })
+  },
+  updateAdminRolePermissions: (roleId: string, permissionCodes: string[]) => {
+    return requestJson<AdminRole>(`/admin/roles/${roleId}/permissions`, {
+      method: 'PUT',
+      body: JSON.stringify({ permissionCodes })
     })
   },
   updateUserRoles: (userId: string, assignments: Array<{
@@ -588,6 +749,12 @@ export const apiClient = {
     return requestJson<{ userId: string, updated: boolean }>(`/admin/users/${userId}/password`, {
       method: 'PUT',
       body: JSON.stringify({ newPassword })
+    })
+  },
+  updateUserPermissions: (userId: string, permissions: string[]) => {
+    return requestJson<{ userId: string, updated: boolean }>(`/admin/users/${userId}/permissions`, {
+      method: 'PUT',
+      body: JSON.stringify({ permissions })
     })
   },
   setActiveUser: (userId: string) => {

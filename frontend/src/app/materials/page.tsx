@@ -1,9 +1,11 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import {
   apiClient,
   getDefaultWarehouseId,
+  type InventoryActionRow,
   type MasterMaterial,
   type MasterSupplier,
   type MaterialStockRow
@@ -28,10 +30,13 @@ type MaterialFormState = {
 }
 
 type StatusFilter = 'ALL' | 'ACTIVE' | 'INACTIVE'
+type MaterialSubTab = 'WAREHOUSE' | 'CATALOG'
+type ActionHistoryTab = 'RECEIPT' | 'ISSUE' | 'DISPOSAL'
 
 const MATERIAL_UOM_OPTIONS = ['kg', 'g', 'ml', 'l'] as const
 
 const MaterialsPage = () => {
+  const searchParams = useSearchParams()
   const { session } = useSession()
   const [materialRows, setMaterialRows] = useState<MaterialStockRow[]>([])
   const [materials, setMaterials] = useState<MasterMaterial[]>([])
@@ -43,6 +48,9 @@ const MaterialsPage = () => {
   const [receiptNo, setReceiptNo] = useState(`PNK-${Date.now()}`)
   const [receiptNote, setReceiptNote] = useState('')
   const [receiptLines, setReceiptLines] = useState<ReceiptLine[]>([])
+  const [inventoryActions, setInventoryActions] = useState<InventoryActionRow[]>([])
+  const [cancelingAction, setCancelingAction] = useState<InventoryActionRow | null>(null)
+  const [cancelReason, setCancelReason] = useState('')
   const [feedback, setFeedback] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [materialForm, setMaterialForm] = useState<MaterialFormState>({
@@ -56,21 +64,26 @@ const MaterialsPage = () => {
   const [showActionModal, setShowActionModal] = useState(false)
   const [showMaterialModal, setShowMaterialModal] = useState(false)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL')
+  const [actionHistoryTab, setActionHistoryTab] = useState<ActionHistoryTab>('RECEIPT')
+  const materialSubTab: MaterialSubTab = searchParams.get('view') === 'catalog' ? 'CATALOG' : 'WAREHOUSE'
 
   const canReceive = session?.permissions.includes('inventory.receive') ?? false
   const canIssue = session?.permissions.includes('inventory.issue') ?? false
   const canAdjust = session?.permissions.includes('inventory.adjust') ?? false
+  const canCancelInventory = (session?.permissions.includes('inventory.cancel') ?? false) || canAdjust
   const canManageMaterial = session?.permissions.includes('material.manage') ?? false
 
   const loadData = async () => {
-    const [stocks, masters, supplierRows] = await Promise.all([
+    const [stocks, masters, supplierRows, actionRows] = await Promise.all([
       apiClient.getMaterialStocks(),
       apiClient.getMaterialsMaster(),
-      apiClient.getSuppliersMaster()
+      apiClient.getSuppliersMaster(),
+      apiClient.getInventoryActions()
     ])
     setMaterialRows(stocks)
     setMaterials(masters)
     setSuppliers(supplierRows)
+    setInventoryActions(actionRows)
     if (masters.length > 0) {
       const selectedStillActive = masters.some((material) => material.id === selectedMaterialId && material.isActive)
       if (!selectedStillActive) {
@@ -120,6 +133,9 @@ const MaterialsPage = () => {
     [materialRows]
   )
   const overAgeRows = useMemo(() => materialRows.filter((row) => row.storageDays >= 30), [materialRows])
+  const filteredInventoryActions = useMemo(() => {
+    return inventoryActions.filter((action) => action.actionType === actionHistoryTab)
+  }, [actionHistoryTab, inventoryActions])
 
   const handleReceiptLineChange = (index: number, field: keyof ReceiptLine, value: string) => {
     setReceiptLines((previous) => {
@@ -322,11 +338,57 @@ const MaterialsPage = () => {
     setShowActionModal(false)
   }
 
+  const handleOpenCancelActionModal = (action: InventoryActionRow) => {
+    setCancelingAction(action)
+    setCancelReason('')
+  }
+
+  const handleCloseCancelActionModal = () => {
+    setCancelingAction(null)
+    setCancelReason('')
+  }
+
+  const handleConfirmCancelInventoryAction = async () => {
+    if (!cancelingAction) {
+      return
+    }
+    if (cancelingAction.referenceType === 'MANUAL_ISSUE') {
+      setFeedback('Phiếu xuất dựa trên lệnh đặt hàng không hỗ trợ huỷ')
+      handleCloseCancelActionModal()
+      return
+    }
+    if (!cancelReason.trim()) {
+      setFeedback('Vui lòng nhập lý do huỷ')
+      return
+    }
+    try {
+      await apiClient.cancelInventoryAction({
+        referenceType: cancelingAction.referenceType,
+        referenceId: cancelingAction.referenceId,
+        reason: cancelReason.trim()
+      })
+      await loadData()
+      setFeedback(`Đã huỷ ${cancelingAction.documentNo}`)
+      handleCloseCancelActionModal()
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : 'Không thể huỷ phiếu')
+    }
+  }
+
   const canSubmit = activeMode === 'RECEIPT'
     ? canReceive
     : activeMode === 'ISSUE'
       ? canIssue
       : canAdjust
+  const canCancelAction = (action: InventoryActionRow) => {
+    if (!canCancelInventory) {
+      return false
+    }
+    if (action.actionType === 'ISSUE') {
+      return false
+    }
+    return action.status !== 'CANCELLED'
+  }
   const hasValidSelection = activeMode === 'RECEIPT'
     ? activeMaterials.length > 0
     : activeMaterials.some((material) => material.id === selectedMaterialId)
@@ -342,122 +404,209 @@ const MaterialsPage = () => {
         </div>
       </header>
 
-      <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <article className="surface-card p-4">
-          <p className="text-xs uppercase text-slate-500">Tổng SKU</p>
-          <p className="mt-1 text-2xl font-semibold">{totalSku}</p>
-        </article>
-        <article className="surface-card p-4">
-          <p className="text-xs uppercase text-slate-500">SKU cần cảnh báo</p>
-          <p className="mt-1 text-2xl font-semibold text-amber-600">{lowStockRows.length}</p>
-        </article>
-        <article className="surface-card p-4">
-          <p className="text-xs uppercase text-slate-500">Lô quá ngày</p>
-          <p className="mt-1 text-2xl font-semibold text-rose-600">{overAgeRows.length}</p>
-        </article>
-      </section>
+      {materialSubTab === 'WAREHOUSE' && (
+        <>
+          <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <article className="surface-card p-4">
+              <p className="text-xs uppercase text-slate-500">Tổng SKU</p>
+              <p className="mt-1 text-2xl font-semibold">{totalSku}</p>
+            </article>
+            <article className="surface-card p-4">
+              <p className="text-xs uppercase text-slate-500">SKU cần cảnh báo</p>
+              <p className="mt-1 text-2xl font-semibold text-amber-600">{lowStockRows.length}</p>
+            </article>
+            <article className="surface-card p-4">
+              <p className="text-xs uppercase text-slate-500">Lô quá ngày</p>
+              <p className="mt-1 text-2xl font-semibold text-rose-600">{overAgeRows.length}</p>
+            </article>
+          </section>
 
-      <section className="surface-card p-4">
-        <h2 className="mb-3 text-base font-semibold">Phiếu nhập / xuất / huỷ</h2>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => handleOpenActionModal('RECEIPT')} disabled={!canReceive} className="rounded-lg bg-blue-600 px-3 py-2 text-sm text-white disabled:opacity-50">Phiếu nhập</button>
-          <button type="button" onClick={() => handleOpenActionModal('ISSUE')} disabled={!canIssue} className="rounded-lg bg-blue-600 px-3 py-2 text-sm text-white disabled:opacity-50">Phiếu xuất</button>
-          <button type="button" onClick={() => handleOpenActionModal('DISPOSAL')} disabled={!canAdjust} className="rounded-lg bg-blue-600 px-3 py-2 text-sm text-white disabled:opacity-50">Phiếu huỷ</button>
-        </div>
-        {activeMaterials.length === 0 && (
-          <p className="mt-2 rounded-lg bg-amber-50 p-2 text-sm text-amber-700">
-            Không có nguyên liệu đang hoạt động để chọn cho phiếu nhập/xuất/huỷ.
-          </p>
-        )}
-      </section>
-
-      <section className="surface-card p-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-base font-semibold">Danh mục nguyên liệu</h2>
-            <p className="text-sm text-slate-500">Bấm nút để mở popup thêm mới nguyên liệu</p>
-          </div>
-          <button
-            type="button"
-            onClick={handleOpenCreateMaterialModal}
-            disabled={!canManageMaterial}
-            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-          >
-            + Thêm NVL
-          </button>
-        </div>
-        {!canManageMaterial && <p className="mt-2 text-sm text-amber-700">Bạn không có quyền material.manage</p>}
-      </section>
-
-      <section className="surface-card hidden overflow-x-auto md:block">
-        <table className="min-w-full divide-y divide-slate-200 text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-            <tr>
-              <th className="px-4 py-3">Mã NVL</th>
-              <th className="px-4 py-3">Tên NVL</th>
-              <th className="px-4 py-3">Lô</th>
-              <th className="px-4 py-3 text-right">Tồn hiện tại</th>
-              <th className="px-4 py-3 text-right">Tồn tối thiểu</th>
-              <th className="px-4 py-3 text-right">Số ngày lưu kho</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {materialRows.map((row) => (
-              <tr key={`${row.code}-${row.batchNo}`} className="hover:bg-slate-50">
-                <td className="px-4 py-3 font-medium">{row.code}</td>
-                <td className="px-4 py-3">{row.name}</td>
-                <td className="px-4 py-3">{row.batchNo}</td>
-                <td className="px-4 py-3 text-right font-semibold">{row.quantityOnHand}</td>
-                <td className="px-4 py-3 text-right">{row.minimumStock}</td>
-                <td className="px-4 py-3 text-right">
-                  <span className={`status-pill ${row.storageDays >= 30 ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                    {row.storageDays} ngày
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
-
-      <section className="surface-card p-4">
-        <h2 className="mb-3 text-base font-semibold">Danh sách nguyên liệu</h2>
-        <div className="mb-3 flex flex-wrap gap-2">
-          <button type="button" onClick={() => setStatusFilter('ALL')} className={`rounded-lg px-3 py-1 text-xs ${statusFilter === 'ALL' ? 'bg-slate-900 text-white' : 'bg-slate-100'}`}>Tất cả</button>
-          <button type="button" onClick={() => setStatusFilter('ACTIVE')} className={`rounded-lg px-3 py-1 text-xs ${statusFilter === 'ACTIVE' ? 'bg-emerald-600 text-white' : 'bg-slate-100'}`}>Hoạt động</button>
-          <button type="button" onClick={() => setStatusFilter('INACTIVE')} className={`rounded-lg px-3 py-1 text-xs ${statusFilter === 'INACTIVE' ? 'bg-rose-600 text-white' : 'bg-slate-100'}`}>Ngừng hoạt động</button>
-        </div>
-        <div className="space-y-2">
-          {filteredMaterials.map((material) => (
-            <div key={material.id} className="flex flex-col gap-2 rounded-xl border border-slate-100 bg-white p-3 md:flex-row md:items-center md:justify-between">
-              <div>
-                <p className="font-semibold">{material.code} - {material.name}</p>
-                <p className="text-xs text-slate-500">Min: {material.minimumStock} {material.uom} | Max days: {material.maxStorageDays}</p>
-                <p className={`text-xs ${material.isActive ? 'text-emerald-600' : 'text-rose-600'}`}>
-                  Trạng thái: {material.isActive ? 'Hoạt động' : 'Ngừng hoạt động'}
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <button type="button" onClick={() => handleEditMaterial(material)} disabled={!canManageMaterial} className="rounded-lg border border-slate-200 px-3 py-1 text-xs disabled:opacity-50">Sửa</button>
-                <button type="button" onClick={() => handleDeleteMaterial(material.id)} disabled={!canManageMaterial} className="rounded-lg border border-rose-200 px-3 py-1 text-xs text-rose-600 disabled:opacity-50">Xoá</button>
-                <button
-                  type="button"
-                  onClick={() => handleToggleMaterialStatus(material.id, material.isActive)}
-                  disabled={!canManageMaterial}
-                  className="rounded-lg border border-blue-200 px-3 py-1 text-xs text-blue-600 disabled:opacity-50"
-                >
-                  {material.isActive ? 'Ngừng hoạt động' : 'Kích hoạt'}
-                </button>
-              </div>
+          <section className="surface-card p-4">
+            <h2 className="mb-3 text-base font-semibold">Phiếu nhập / xuất / huỷ</h2>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => handleOpenActionModal('RECEIPT')} disabled={!canReceive} className="rounded-lg bg-blue-600 px-3 py-2 text-sm text-white disabled:opacity-50">Phiếu nhập</button>
+              <button type="button" onClick={() => handleOpenActionModal('ISSUE')} disabled={!canIssue} className="rounded-lg bg-blue-600 px-3 py-2 text-sm text-white disabled:opacity-50">Phiếu xuất</button>
+              <button type="button" onClick={() => handleOpenActionModal('DISPOSAL')} disabled={!canAdjust} className="rounded-lg bg-blue-600 px-3 py-2 text-sm text-white disabled:opacity-50">Phiếu huỷ</button>
             </div>
-          ))}
-          {filteredMaterials.length === 0 && (
-            <p className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-500">
-              Không có nguyên liệu theo bộ lọc đã chọn.
-            </p>
-          )}
-        </div>
-      </section>
+            {activeMaterials.length === 0 && (
+              <p className="mt-2 rounded-lg bg-amber-50 p-2 text-sm text-amber-700">
+                Không có nguyên liệu đang hoạt động để chọn cho phiếu nhập/xuất/huỷ.
+              </p>
+            )}
+          </section>
+
+          <section className="surface-card hidden overflow-x-auto md:block">
+            <table className="min-w-full divide-y divide-slate-200 text-sm">
+              <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Mã NVL</th>
+                  <th className="px-4 py-3">Tên NVL</th>
+                  <th className="px-4 py-3">Lô</th>
+                  <th className="px-4 py-3 text-right">Tồn hiện tại</th>
+                  <th className="px-4 py-3 text-right">Tồn tối thiểu</th>
+                  <th className="px-4 py-3 text-right">Số ngày lưu kho</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {materialRows.map((row) => (
+                  <tr key={`${row.code}-${row.batchNo}`} className="hover:bg-slate-50">
+                    <td className="px-4 py-3 font-medium">{row.code}</td>
+                    <td className="px-4 py-3">{row.name}</td>
+                    <td className="px-4 py-3">{row.batchNo}</td>
+                    <td className="px-4 py-3 text-right font-semibold">{row.quantityOnHand}</td>
+                    <td className="px-4 py-3 text-right">{row.minimumStock}</td>
+                    <td className="px-4 py-3 text-right">
+                      <span className={`status-pill ${row.storageDays >= 30 ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                        {row.storageDays} ngày
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+
+          <section className="surface-card p-4">
+            <h2 className="mb-3 text-base font-semibold">Lịch sử phiếu nhập / xuất / huỷ</h2>
+            <div className="mb-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setActionHistoryTab('RECEIPT')}
+                className={`rounded-lg px-3 py-1 text-xs ${actionHistoryTab === 'RECEIPT' ? 'bg-blue-600 text-white' : 'bg-slate-100'}`}
+              >
+                Phiếu nhập
+              </button>
+              <button
+                type="button"
+                onClick={() => setActionHistoryTab('ISSUE')}
+                className={`rounded-lg px-3 py-1 text-xs ${actionHistoryTab === 'ISSUE' ? 'bg-blue-600 text-white' : 'bg-slate-100'}`}
+              >
+                Phiếu xuất
+              </button>
+              <button
+                type="button"
+                onClick={() => setActionHistoryTab('DISPOSAL')}
+                className={`rounded-lg px-3 py-1 text-xs ${actionHistoryTab === 'DISPOSAL' ? 'bg-blue-600 text-white' : 'bg-slate-100'}`}
+              >
+                Phiếu huỷ
+              </button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-200 text-sm">
+                <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2">Chứng từ</th>
+                    <th className="px-3 py-2">Loại phiếu</th>
+                    <th className="px-3 py-2">Thời gian</th>
+                    <th className="px-3 py-2 text-right">Tổng SL</th>
+                    <th className="px-3 py-2">Trạng thái</th>
+                    <th className="px-3 py-2 text-right">Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {filteredInventoryActions.map((action) => (
+                    <tr key={`${action.referenceType}-${action.referenceId}`}>
+                      <td className="px-3 py-2 font-semibold">{action.documentNo}</td>
+                      <td className="px-3 py-2">
+                        {action.actionType === 'RECEIPT' ? 'Phiếu nhập' : action.actionType === 'ISSUE' ? 'Phiếu xuất' : 'Phiếu huỷ'}
+                      </td>
+                      <td className="px-3 py-2">{new Date(action.movedAt).toLocaleString('vi-VN')}</td>
+                      <td className="px-3 py-2 text-right">{action.totalQuantity}</td>
+                      <td className="px-3 py-2">
+                        <span className={`rounded-full px-2 py-1 text-xs font-semibold ${action.status === 'CANCELLED' ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                          {action.statusLabel}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {action.actionType === 'ISSUE' ? (
+                          <span className="text-xs text-slate-400">Không hỗ trợ</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenCancelActionModal(action)}
+                            disabled={!canCancelAction(action)}
+                            className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Huỷ phiếu
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                  {filteredInventoryActions.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-3 py-4 text-center text-slate-500">
+                        Chưa có dữ liệu cho loại phiếu này
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
+      )}
+
+      {materialSubTab === 'CATALOG' && (
+        <>
+          <section className="surface-card p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-base font-semibold">Danh mục nguyên liệu</h2>
+                <p className="text-sm text-slate-500">Bấm nút để mở popup thêm mới nguyên liệu</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleOpenCreateMaterialModal}
+                disabled={!canManageMaterial}
+                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                + Thêm NVL
+              </button>
+            </div>
+            {!canManageMaterial && <p className="mt-2 text-sm text-amber-700">Bạn không có quyền material.manage</p>}
+          </section>
+
+          <section className="surface-card p-4">
+            <h2 className="mb-3 text-base font-semibold">Danh sách nguyên liệu</h2>
+            <div className="mb-3 flex flex-wrap gap-2">
+              <button type="button" onClick={() => setStatusFilter('ALL')} className={`rounded-lg px-3 py-1 text-xs ${statusFilter === 'ALL' ? 'bg-slate-900 text-white' : 'bg-slate-100'}`}>Tất cả</button>
+              <button type="button" onClick={() => setStatusFilter('ACTIVE')} className={`rounded-lg px-3 py-1 text-xs ${statusFilter === 'ACTIVE' ? 'bg-emerald-600 text-white' : 'bg-slate-100'}`}>Hoạt động</button>
+              <button type="button" onClick={() => setStatusFilter('INACTIVE')} className={`rounded-lg px-3 py-1 text-xs ${statusFilter === 'INACTIVE' ? 'bg-rose-600 text-white' : 'bg-slate-100'}`}>Ngừng hoạt động</button>
+            </div>
+            <div className="space-y-2">
+              {filteredMaterials.map((material) => (
+                <div key={material.id} className="flex flex-col gap-2 rounded-xl border border-slate-100 bg-white p-3 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <p className="font-semibold">{material.code} - {material.name}</p>
+                    <p className="text-xs text-slate-500">Min: {material.minimumStock} {material.uom} | Max days: {material.maxStorageDays}</p>
+                    <p className={`text-xs ${material.isActive ? 'text-emerald-600' : 'text-rose-600'}`}>
+                      Trạng thái: {material.isActive ? 'Hoạt động' : 'Ngừng hoạt động'}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => handleEditMaterial(material)} disabled={!canManageMaterial} className="rounded-lg border border-slate-200 px-3 py-1 text-xs disabled:opacity-50">Sửa</button>
+                    <button type="button" onClick={() => handleDeleteMaterial(material.id)} disabled={!canManageMaterial} className="rounded-lg border border-rose-200 px-3 py-1 text-xs text-rose-600 disabled:opacity-50">Xoá</button>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleMaterialStatus(material.id, material.isActive)}
+                      disabled={!canManageMaterial}
+                      className="rounded-lg border border-blue-200 px-3 py-1 text-xs text-blue-600 disabled:opacity-50"
+                    >
+                      {material.isActive ? 'Ngừng hoạt động' : 'Kích hoạt'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {filteredMaterials.length === 0 && (
+                <p className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-500">
+                  Không có nguyên liệu theo bộ lọc đã chọn.
+                </p>
+              )}
+            </div>
+          </section>
+        </>
+      )}
 
       {showMaterialModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
@@ -595,6 +744,44 @@ const MaterialsPage = () => {
                 Tài khoản hiện tại chưa được phân quyền cho thao tác này.
               </p>
             )}
+          </section>
+        </div>
+      )}
+
+      {cancelingAction && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4">
+          <section className="w-full max-w-xl rounded-2xl bg-white p-4 shadow-xl" role="dialog" aria-modal="true" aria-label="Xác nhận huỷ phiếu">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-base font-semibold">Xác nhận huỷ phiếu</h2>
+              <button type="button" onClick={handleCloseCancelActionModal} className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-sm">
+                Đóng
+              </button>
+            </div>
+            <p className="mb-2 text-sm text-slate-700">
+              Bạn đang huỷ chứng từ <span className="font-semibold">{cancelingAction.documentNo}</span>. Vui lòng nhập lý do huỷ.
+            </p>
+            <textarea
+              className="min-h-[100px] w-full rounded-lg border border-slate-200 bg-white p-2 text-sm"
+              placeholder="Nhập lý do huỷ (bắt buộc)"
+              value={cancelReason}
+              onChange={(event) => setCancelReason(event.target.value)}
+            />
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={handleConfirmCancelInventoryAction}
+                className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white"
+              >
+                Xác nhận huỷ
+              </button>
+              <button
+                type="button"
+                onClick={handleCloseCancelActionModal}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm"
+              >
+                Huỷ bỏ
+              </button>
+            </div>
           </section>
         </div>
       )}

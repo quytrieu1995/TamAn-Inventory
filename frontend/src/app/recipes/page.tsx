@@ -14,6 +14,13 @@ type RecipeItemDraft = {
 }
 
 type ProductStatusFilter = 'ALL' | 'ACTIVE' | 'INACTIVE'
+type FinishedGoodUom = 'lon' | 'chai' | 'goi'
+
+const FINISHED_GOOD_UOM_OPTIONS: Array<{ value: FinishedGoodUom, label: string }> = [
+  { value: 'lon', label: 'Lon' },
+  { value: 'chai', label: 'Chai' },
+  { value: 'goi', label: 'Gói' }
+]
 
 const RecipesPage = () => {
   const { session } = useSession()
@@ -21,7 +28,8 @@ const RecipesPage = () => {
   const [recipes, setRecipes] = useState<MasterRecipe[]>([])
   const [productCode, setProductCode] = useState('')
   const [productName, setProductName] = useState('')
-  const [productUom, setProductUom] = useState('kg')
+  const [productUom, setProductUom] = useState<FinishedGoodUom>('goi')
+  const [productUnitPrice, setProductUnitPrice] = useState('0')
   const [recipeItems, setRecipeItems] = useState<RecipeItemDraft[]>([])
   const [showCreateProductModal, setShowCreateProductModal] = useState(false)
   const [searchKeyword, setSearchKeyword] = useState('')
@@ -29,6 +37,8 @@ const RecipesPage = () => {
   const [editingRecipeId, setEditingRecipeId] = useState<string | null>(null)
   const [editingRecipeName, setEditingRecipeName] = useState('')
   const [editingProductName, setEditingProductName] = useState('')
+  const [editingProductUom, setEditingProductUom] = useState<FinishedGoodUom>('goi')
+  const [editingProductUnitPrice, setEditingProductUnitPrice] = useState('0')
   const [editingRecipeItems, setEditingRecipeItems] = useState<RecipeItemDraft[]>([])
   const [detailRecipeId, setDetailRecipeId] = useState<string | null>(null)
   const [detailRecipeItems, setDetailRecipeItems] = useState<RecipeItemDraft[]>([])
@@ -199,8 +209,13 @@ const RecipesPage = () => {
       setFeedback('Bạn không có quyền thêm sản phẩm/BOM')
       return
     }
-    if (!productCode.trim() || !productName.trim() || !productUom.trim()) {
-      setFeedback('Vui lòng nhập đầy đủ mã sản phẩm, tên sản phẩm và đơn vị tính')
+    if (!productCode.trim() || !productName.trim()) {
+      setFeedback('Vui lòng nhập đầy đủ mã sản phẩm, tên sản phẩm, đơn vị tính và đơn giá')
+      return
+    }
+    const parsedUnitPrice = Number(productUnitPrice)
+    if (!Number.isFinite(parsedUnitPrice) || parsedUnitPrice < 0) {
+      setFeedback('Đơn giá sản phẩm phải là số không âm')
       return
     }
     if (recipeItems.length === 0) {
@@ -221,7 +236,8 @@ const RecipesPage = () => {
         product: {
           code: productCode.trim(),
           name: productName.trim(),
-          uom: productUom.trim()
+          uom: productUom.trim(),
+          unitPrice: parsedUnitPrice
         },
         items: recipeItems.map((item) => ({
           materialId: item.materialId,
@@ -230,7 +246,8 @@ const RecipesPage = () => {
       })
       setProductCode('')
       setProductName('')
-      setProductUom('kg')
+      setProductUom('goi')
+      setProductUnitPrice('0')
       if (activeMaterials.length > 0) {
         setRecipeItems([
           {
@@ -254,7 +271,8 @@ const RecipesPage = () => {
   const resetCreateProductForm = () => {
     setProductCode('')
     setProductName('')
-    setProductUom('kg')
+    setProductUom('goi')
+    setProductUnitPrice('0')
     if (activeMaterials.length > 0) {
       setRecipeItems([
         {
@@ -286,6 +304,12 @@ const RecipesPage = () => {
       setEditingRecipeId(detail.id)
       setEditingRecipeName(detail.name)
       setEditingProductName(recipeSummary?.productName ?? '')
+      if (recipeSummary?.productUom === 'lon' || recipeSummary?.productUom === 'chai' || recipeSummary?.productUom === 'goi') {
+        setEditingProductUom(recipeSummary.productUom)
+      } else {
+        setEditingProductUom('goi')
+      }
+      setEditingProductUnitPrice(String(recipeSummary?.productUnitPrice ?? 0))
       setEditingRecipeItems(detail.items.map((item) => ({
         materialId: item.materialId,
         qtyPerUnit: String(item.qtyPerUnit)
@@ -318,6 +342,8 @@ const RecipesPage = () => {
     setEditingRecipeId(null)
     setEditingRecipeName('')
     setEditingProductName('')
+    setEditingProductUom('goi')
+    setEditingProductUnitPrice('0')
     setEditingRecipeItems([])
   }
 
@@ -342,6 +368,11 @@ const RecipesPage = () => {
       setFeedback('Vui lòng nhập tên sản phẩm')
       return
     }
+    const parsedEditingUnitPrice = Number(editingProductUnitPrice)
+    if (!Number.isFinite(parsedEditingUnitPrice) || parsedEditingUnitPrice < 0) {
+      setFeedback('Đơn giá sản phẩm phải là số không âm')
+      return
+    }
 
     setSubmitting(true)
     setFeedback(null)
@@ -349,6 +380,8 @@ const RecipesPage = () => {
       await apiClient.updateRecipe(editingRecipeId, {
         name: editingRecipeName.trim() || 'BOM sản phẩm',
         productName: editingProductName.trim(),
+        productUom: editingProductUom,
+        productUnitPrice: parsedEditingUnitPrice,
         items: editingRecipeItems.map((item) => ({
           materialId: item.materialId,
           qtyPerUnit: Number(item.qtyPerUnit)
@@ -472,6 +505,7 @@ const RecipesPage = () => {
                 <th className="px-3 py-2">Sản phẩm</th>
                 <th className="px-3 py-2">BOM ID</th>
                 <th className="px-3 py-2">Trạng thái</th>
+                <th className="px-3 py-2 text-right">Đơn giá</th>
                 <th className="px-3 py-2">Phiên bản</th>
                 <th className="px-3 py-2">Hành động</th>
               </tr>
@@ -490,6 +524,7 @@ const RecipesPage = () => {
                       {recipe.productIsActive ? 'Hoạt động' : 'Ngừng hoạt động'}
                     </span>
                   </td>
+                  <td className="px-3 py-3 text-right">{recipe.productUnitPrice}</td>
                   <td className="px-3 py-3">
                     <span className="status-pill bg-indigo-100 text-indigo-700">v{recipe.versionNo}</span>
                   </td>
@@ -533,7 +568,7 @@ const RecipesPage = () => {
               ))}
               {filteredRecipes.length === 0 && (
                 <tr className="bg-white">
-                  <td colSpan={5} className="px-3 py-4 text-center text-sm text-slate-500">
+                  <td colSpan={6} className="px-3 py-4 text-center text-sm text-slate-500">
                     Không tìm thấy sản phẩm phù hợp
                   </td>
                 </tr>
@@ -597,6 +632,28 @@ const RecipesPage = () => {
                 className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2"
                 value={editingProductName}
                 onChange={(event) => setEditingProductName(event.target.value)}
+              />
+            </label>
+            <label className="text-sm">
+              <span>Đơn vị tính sản phẩm</span>
+              <select
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2"
+                value={editingProductUom}
+                onChange={(event) => setEditingProductUom(event.target.value as FinishedGoodUom)}
+              >
+                {FINISHED_GOOD_UOM_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm">
+              <span>Đơn giá sản phẩm</span>
+              <input
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2"
+                value={editingProductUnitPrice}
+                onChange={(event) => setEditingProductUnitPrice(event.target.value)}
               />
             </label>
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -681,7 +738,7 @@ const RecipesPage = () => {
               </button>
             </div>
             <form onSubmit={handleCreateRecipe} className="grid grid-cols-1 gap-3">
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
                 <label className="text-sm">
                   <span>Mã sản phẩm mới</span>
                   <input className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2" value={productCode} onChange={(event) => setProductCode(event.target.value)} />
@@ -692,7 +749,25 @@ const RecipesPage = () => {
                 </label>
                 <label className="text-sm">
                   <span>Đơn vị tính</span>
-                  <input className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2" value={productUom} onChange={(event) => setProductUom(event.target.value)} />
+                  <select
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2"
+                    value={productUom}
+                    onChange={(event) => setProductUom(event.target.value as FinishedGoodUom)}
+                  >
+                    {FINISHED_GOOD_UOM_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-sm">
+                  <span>Đơn giá sản phẩm</span>
+                  <input
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2"
+                    value={productUnitPrice}
+                    onChange={(event) => setProductUnitPrice(event.target.value)}
+                  />
                 </label>
               </div>
 
