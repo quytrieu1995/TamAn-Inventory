@@ -237,6 +237,7 @@ export type MasterRecipe = {
   finishedGoodId: string
   versionNo: number
   name: string
+  lossRatePercent: number
   productCode: string
   productName: string
   productUom: string
@@ -249,6 +250,7 @@ export type RecipeDetail = {
   finishedGoodId: string
   name: string
   versionNo: number
+  lossRatePercent: number
   items: Array<{
     materialId: string
     qtyPerUnit: number
@@ -610,6 +612,7 @@ export const apiClient = {
   createRecipe: (input: {
     id: string
     name: string
+    lossRatePercent: number
     product: {
       code: string
       name: string
@@ -628,6 +631,7 @@ export const apiClient = {
   },
   updateRecipe: (recipeId: string, input: {
     name: string
+    lossRatePercent?: number
     productName?: string
     productUom?: string
     productUnitPrice?: number

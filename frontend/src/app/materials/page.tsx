@@ -11,6 +11,7 @@ import {
   type MaterialStockRow
 } from '../../lib/api'
 import { useSession } from '../../hooks/use-session'
+import TablePageSizeControl from '../../components/TablePageSizeControl'
 
 type ActionMode = 'RECEIPT' | 'ISSUE' | 'DISPOSAL'
 
@@ -65,6 +66,7 @@ const MaterialsPage = () => {
   const [showMaterialModal, setShowMaterialModal] = useState(false)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL')
   const [actionHistoryTab, setActionHistoryTab] = useState<ActionHistoryTab>('RECEIPT')
+  const [tablePageSize, setTablePageSize] = useState<10 | 20 | 50>(10)
   const materialSubTab: MaterialSubTab = searchParams.get('view') === 'catalog' ? 'CATALOG' : 'WAREHOUSE'
 
   const canReceive = session?.permissions.includes('inventory.receive') ?? false
@@ -136,6 +138,9 @@ const MaterialsPage = () => {
   const filteredInventoryActions = useMemo(() => {
     return inventoryActions.filter((action) => action.actionType === actionHistoryTab)
   }, [actionHistoryTab, inventoryActions])
+  const visibleMaterialRows = useMemo(() => materialRows.slice(0, tablePageSize), [materialRows, tablePageSize])
+  const visibleInventoryActions = useMemo(() => filteredInventoryActions.slice(0, tablePageSize), [filteredInventoryActions, tablePageSize])
+  const visibleCatalogMaterials = useMemo(() => filteredMaterials.slice(0, tablePageSize), [filteredMaterials, tablePageSize])
 
   const handleReceiptLineChange = (index: number, field: keyof ReceiptLine, value: string) => {
     setReceiptLines((previous) => {
@@ -436,6 +441,9 @@ const MaterialsPage = () => {
           </section>
 
           <section className="surface-card hidden overflow-x-auto md:block">
+            <div className="mb-3 p-4 pb-0">
+              <TablePageSizeControl value={tablePageSize} onChange={setTablePageSize} />
+            </div>
             <table className="min-w-full divide-y divide-slate-200 text-sm">
               <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                 <tr>
@@ -448,7 +456,7 @@ const MaterialsPage = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {materialRows.map((row) => (
+                {visibleMaterialRows.map((row) => (
                   <tr key={`${row.code}-${row.batchNo}`} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-medium">{row.code}</td>
                     <td className="px-4 py-3">{row.name}</td>
@@ -491,6 +499,9 @@ const MaterialsPage = () => {
                 Phiếu huỷ
               </button>
             </div>
+            <div className="mb-3">
+              <TablePageSizeControl value={tablePageSize} onChange={setTablePageSize} />
+            </div>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-slate-200 text-sm">
                 <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
@@ -504,7 +515,7 @@ const MaterialsPage = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
-                  {filteredInventoryActions.map((action) => (
+                  {visibleInventoryActions.map((action) => (
                     <tr key={`${action.referenceType}-${action.referenceId}`}>
                       <td className="px-3 py-2 font-semibold">{action.documentNo}</td>
                       <td className="px-3 py-2">
@@ -533,7 +544,7 @@ const MaterialsPage = () => {
                       </td>
                     </tr>
                   ))}
-                  {filteredInventoryActions.length === 0 && (
+                  {visibleInventoryActions.length === 0 && (
                     <tr>
                       <td colSpan={6} className="px-3 py-4 text-center text-slate-500">
                         Chưa có dữ liệu cho loại phiếu này
@@ -574,35 +585,60 @@ const MaterialsPage = () => {
               <button type="button" onClick={() => setStatusFilter('ACTIVE')} className={`rounded-lg px-3 py-1 text-xs ${statusFilter === 'ACTIVE' ? 'bg-emerald-600 text-white' : 'bg-slate-100'}`}>Hoạt động</button>
               <button type="button" onClick={() => setStatusFilter('INACTIVE')} className={`rounded-lg px-3 py-1 text-xs ${statusFilter === 'INACTIVE' ? 'bg-rose-600 text-white' : 'bg-slate-100'}`}>Ngừng hoạt động</button>
             </div>
-            <div className="space-y-2">
-              {filteredMaterials.map((material) => (
-                <div key={material.id} className="flex flex-col gap-2 rounded-xl border border-slate-100 bg-white p-3 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <p className="font-semibold">{material.code} - {material.name}</p>
-                    <p className="text-xs text-slate-500">Min: {material.minimumStock} {material.uom} | Max days: {material.maxStorageDays}</p>
-                    <p className={`text-xs ${material.isActive ? 'text-emerald-600' : 'text-rose-600'}`}>
-                      Trạng thái: {material.isActive ? 'Hoạt động' : 'Ngừng hoạt động'}
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    <button type="button" onClick={() => handleEditMaterial(material)} disabled={!canManageMaterial} className="rounded-lg border border-slate-200 px-3 py-1 text-xs disabled:opacity-50">Sửa</button>
-                    <button type="button" onClick={() => handleDeleteMaterial(material.id)} disabled={!canManageMaterial} className="rounded-lg border border-rose-200 px-3 py-1 text-xs text-rose-600 disabled:opacity-50">Xoá</button>
-                    <button
-                      type="button"
-                      onClick={() => handleToggleMaterialStatus(material.id, material.isActive)}
-                      disabled={!canManageMaterial}
-                      className="rounded-lg border border-blue-200 px-3 py-1 text-xs text-blue-600 disabled:opacity-50"
-                    >
-                      {material.isActive ? 'Ngừng hoạt động' : 'Kích hoạt'}
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {filteredMaterials.length === 0 && (
-                <p className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-500">
-                  Không có nguyên liệu theo bộ lọc đã chọn.
-                </p>
-              )}
+            <div className="mb-3">
+              <TablePageSizeControl value={tablePageSize} onChange={setTablePageSize} />
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-200 text-sm">
+                <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2">Mã NVL</th>
+                    <th className="px-3 py-2">Tên NVL</th>
+                    <th className="px-3 py-2">ĐVT</th>
+                    <th className="px-3 py-2 text-right">Tồn tối thiểu</th>
+                    <th className="px-3 py-2 text-right">Số ngày lưu kho tối đa</th>
+                    <th className="px-3 py-2">Trạng thái</th>
+                    <th className="px-3 py-2 text-right">Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {visibleCatalogMaterials.map((material) => (
+                    <tr key={material.id}>
+                      <td className="px-3 py-2 font-medium">{material.code}</td>
+                      <td className="px-3 py-2">{material.name}</td>
+                      <td className="px-3 py-2">{material.uom}</td>
+                      <td className="px-3 py-2 text-right">{material.minimumStock}</td>
+                      <td className="px-3 py-2 text-right">{material.maxStorageDays}</td>
+                      <td className="px-3 py-2">
+                        <span className={`rounded-full px-2 py-1 text-xs font-semibold ${material.isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
+                          {material.isActive ? 'Hoạt động' : 'Ngừng hoạt động'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <div className="flex justify-end gap-2">
+                          <button type="button" onClick={() => handleEditMaterial(material)} disabled={!canManageMaterial} className="rounded-lg border border-slate-200 px-3 py-1 text-xs disabled:opacity-50">Sửa</button>
+                          <button type="button" onClick={() => handleDeleteMaterial(material.id)} disabled={!canManageMaterial} className="rounded-lg border border-rose-200 px-3 py-1 text-xs text-rose-600 disabled:opacity-50">Xoá</button>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleMaterialStatus(material.id, material.isActive)}
+                            disabled={!canManageMaterial}
+                            className="rounded-lg border border-blue-200 px-3 py-1 text-xs text-blue-600 disabled:opacity-50"
+                          >
+                            {material.isActive ? 'Ngừng hoạt động' : 'Kích hoạt'}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {visibleCatalogMaterials.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="px-3 py-4 text-center text-slate-500">
+                        Không có nguyên liệu theo bộ lọc đã chọn.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </section>
         </>

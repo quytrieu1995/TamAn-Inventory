@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { apiClient, getDefaultWarehouseId, type AdminPermission, type AdminRole, type AdminUser } from '../../lib/api'
 import { useSession } from '../../hooks/use-session'
+import TablePageSizeControl from '../../components/TablePageSizeControl'
 
 const MATRIX_ACTIONS = [
   { key: 'view', label: 'Xem' },
@@ -100,6 +101,7 @@ const UsersPage = () => {
   const [editingIsActive, setEditingIsActive] = useState(true)
   const [editingRoleId, setEditingRoleId] = useState('')
   const [editingNewPassword, setEditingNewPassword] = useState('')
+  const [tablePageSize, setTablePageSize] = useState<10 | 20 | 50>(10)
   const [feedback, setFeedback] = useState<string | null>(null)
 
   const canManageUsers = session?.permissions.includes('user.manage') ?? false
@@ -170,6 +172,8 @@ const UsersPage = () => {
     () => roles.find((role) => role.id === selectedRoleDetailId) ?? null,
     [roles, selectedRoleDetailId]
   )
+  const visibleUsers = useMemo(() => users.slice(0, tablePageSize), [users, tablePageSize])
+  const visibleRoles = useMemo(() => roles.slice(0, tablePageSize), [roles, tablePageSize])
   const permissionDescriptionByCode = useMemo(
     () => new Map(permissions.map((permission) => [permission.code, permission.description])),
     [permissions]
@@ -382,6 +386,9 @@ const UsersPage = () => {
               Tạo người dùng
             </button>
           </div>
+          <div className="mb-3">
+            <TablePageSizeControl value={tablePageSize} onChange={setTablePageSize} />
+          </div>
           <div className="overflow-x-auto rounded-xl border border-slate-200">
             <table className="min-w-full divide-y divide-slate-200 text-sm">
               <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
@@ -394,7 +401,7 @@ const UsersPage = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
-                {users.map((user) => (
+                {visibleUsers.map((user) => (
                   <tr key={user.id}>
                     <td className="px-3 py-2 font-semibold">{user.fullName}</td>
                     <td className="px-3 py-2">{user.email}</td>
@@ -415,7 +422,7 @@ const UsersPage = () => {
                     </td>
                   </tr>
                 ))}
-                {users.length === 0 && (
+                {visibleUsers.length === 0 && (
                   <tr>
                     <td colSpan={5} className="px-3 py-4 text-center text-slate-500">
                       Chưa có dữ liệu người dùng
@@ -508,6 +515,9 @@ const UsersPage = () => {
               Tạo vai trò
             </button>
           </div>
+          <div className="mb-3">
+            <TablePageSizeControl value={tablePageSize} onChange={setTablePageSize} />
+          </div>
           <div className="overflow-x-auto rounded-xl border border-slate-200">
             <table className="min-w-full divide-y divide-slate-200 text-sm">
               <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
@@ -519,7 +529,7 @@ const UsersPage = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
-                {roles.map((role) => (
+                {visibleRoles.map((role) => (
                   <tr key={role.id}>
                     <td className="px-3 py-2 font-semibold">{role.name}</td>
                     <td className="px-3 py-2">{role.code}</td>
@@ -549,7 +559,7 @@ const UsersPage = () => {
                     </td>
                   </tr>
                 ))}
-                {roles.length === 0 && (
+                {visibleRoles.length === 0 && (
                   <tr>
                     <td colSpan={4} className="px-3 py-4 text-center text-slate-500">
                       Chưa có vai trò

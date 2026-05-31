@@ -77,6 +77,7 @@ export type Recipe = {
   finishedGoodId: Id
   name: string
   versionNo: number
+  lossRatePercent: number
   items: RecipeItem[]
   updatedAt: string
 }

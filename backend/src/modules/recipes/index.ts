@@ -12,6 +12,7 @@ type CreateRecipeInput = {
   plantId: string
   finishedGoodId: string
   name: string
+  lossRatePercent: number
   items: Array<{
     materialId: string
     qtyPerUnit: number
@@ -67,6 +68,7 @@ export const createRecipeService = ({ recipeRepository }: RecipeServiceDependenc
       finishedGoodId: input.finishedGoodId,
       name: input.name,
       versionNo: latestVersion + 1,
+      lossRatePercent: input.lossRatePercent,
       items: input.items,
       updatedAt: now
     }
@@ -75,7 +77,11 @@ export const createRecipeService = ({ recipeRepository }: RecipeServiceDependenc
     return recipe
   }
 
-  const updateRecipe = async (auth: AuthContext, recipeId: string, input: Pick<CreateRecipeInput, 'name' | 'items'>) => {
+  const updateRecipe = async (
+    auth: AuthContext,
+    recipeId: string,
+    input: Pick<CreateRecipeInput, 'name' | 'items'> & { lossRatePercent?: number }
+  ) => {
     requirePermission(auth, 'recipe.manage')
     const existing = await recipeRepository.getRecipeById(recipeId)
     if (!existing) {
@@ -85,6 +91,7 @@ export const createRecipeService = ({ recipeRepository }: RecipeServiceDependenc
     const recipe: Recipe = {
       ...existing,
       name: input.name,
+      lossRatePercent: input.lossRatePercent ?? existing.lossRatePercent,
       items: input.items,
       versionNo: existing.versionNo + 1,
       updatedAt: new Date().toISOString()

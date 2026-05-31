@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { apiClient, formatCurrencyVnd, type PurchaseReceiptDetail, type SupplierDetailResponse, type SupplierRow } from '../../lib/api'
 import { useSession } from '../../hooks/use-session'
+import TablePageSizeControl from '../../components/TablePageSizeControl'
 
 type SupplierFormState = {
   code: string
@@ -37,6 +38,7 @@ const SuppliersPage = () => {
   const [cancelingReceiptId, setCancelingReceiptId] = useState<string | null>(null)
   const [cancelReceiptNo, setCancelReceiptNo] = useState('')
   const [cancelReason, setCancelReason] = useState('')
+  const [tablePageSize, setTablePageSize] = useState<10 | 20 | 50>(10)
   const [feedback, setFeedback] = useState<string | null>(null)
 
   const canManage = session?.permissions.includes('supplier.manage') ?? false
@@ -44,6 +46,15 @@ const SuppliersPage = () => {
     || session?.permissions.includes('inventory.receive')
     || session?.permissions.includes('inventory.adjust')
     || false
+  const visibleSuppliers = useMemo(() => suppliers.slice(0, tablePageSize), [suppliers, tablePageSize])
+  const visibleSupplierReceipts = useMemo(
+    () => supplierDetail?.receipts.slice(0, tablePageSize) ?? [],
+    [supplierDetail?.receipts, tablePageSize]
+  )
+  const visibleReceiptItems = useMemo(
+    () => receiptDetail?.items.slice(0, tablePageSize) ?? [],
+    [receiptDetail?.items, tablePageSize]
+  )
 
   const loadSuppliers = async () => {
     const rows = await apiClient.getSuppliers()
@@ -227,6 +238,9 @@ const SuppliersPage = () => {
 
       <section className="surface-card p-4">
         <h2 className="mb-3 text-base font-semibold">Danh sách nhà cung cấp</h2>
+        <div className="mb-3">
+          <TablePageSizeControl value={tablePageSize} onChange={setTablePageSize} />
+        </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
@@ -241,7 +255,7 @@ const SuppliersPage = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {suppliers.map((supplier) => (
+              {visibleSuppliers.map((supplier) => (
                 <tr key={supplier.id} className="bg-white">
                   <td className="px-3 py-3 font-medium">{supplier.code}</td>
                   <td className="px-3 py-3">{supplier.name}</td>
@@ -258,7 +272,7 @@ const SuppliersPage = () => {
                   </td>
                 </tr>
               ))}
-              {suppliers.length === 0 && (
+              {visibleSuppliers.length === 0 && (
                 <tr className="bg-white">
                   <td colSpan={7} className="px-3 py-4 text-center text-sm text-slate-500">
                     Chưa có nhà cung cấp nào
@@ -319,6 +333,9 @@ const SuppliersPage = () => {
             </div>
 
             <h3 className="mb-2 text-sm font-semibold">Đơn nhập của nhà cung cấp</h3>
+            <div className="mb-3">
+              <TablePageSizeControl value={tablePageSize} onChange={setTablePageSize} />
+            </div>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-slate-200 text-sm">
                 <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
@@ -335,7 +352,7 @@ const SuppliersPage = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {supplierDetail.receipts.map((receipt) => (
+                  {visibleSupplierReceipts.map((receipt) => (
                     <tr key={receipt.id} className="bg-white">
                       <td className="px-3 py-3 font-medium">
                         <button
@@ -370,7 +387,7 @@ const SuppliersPage = () => {
                       </td>
                     </tr>
                   ))}
-                  {supplierDetail.receipts.length === 0 && (
+                  {visibleSupplierReceipts.length === 0 && (
                     <tr className="bg-white">
                       <td colSpan={9} className="px-3 py-4 text-center text-sm text-slate-500">
                         Nhà cung cấp này chưa có đơn nhập nào
@@ -402,6 +419,9 @@ const SuppliersPage = () => {
             </div>
 
             <div className="overflow-x-auto">
+              <div className="mb-3">
+                <TablePageSizeControl value={tablePageSize} onChange={setTablePageSize} />
+              </div>
               <table className="min-w-full divide-y divide-slate-200 text-sm">
                 <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                   <tr>
@@ -413,7 +433,7 @@ const SuppliersPage = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {receiptDetail.items.map((item) => (
+                  {visibleReceiptItems.map((item) => (
                     <tr key={item.id} className="bg-white">
                       <td className="px-3 py-3">{item.materialCode} - {item.materialName} ({item.materialUom})</td>
                       <td className="px-3 py-3">{item.batchNo}</td>
@@ -422,7 +442,7 @@ const SuppliersPage = () => {
                       <td className="px-3 py-3 text-right">{formatCurrencyVnd(item.lineTotal)}</td>
                     </tr>
                   ))}
-                  {receiptDetail.items.length === 0 && (
+                  {visibleReceiptItems.length === 0 && (
                     <tr className="bg-white">
                       <td colSpan={5} className="px-3 py-4 text-center text-sm text-slate-500">
                         Phiếu nhập không có dòng hàng

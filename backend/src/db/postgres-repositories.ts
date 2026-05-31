@@ -231,6 +231,7 @@ const createRecipeRepository = (db: DbExecutor): FoodInventoryRepositories['reci
     const recipeResult = await db.query(
       `
         SELECT r.id, r.plant_id, r.finished_good_id, r.version_no, r.updated_at,
+               r.loss_rate_percent,
                COALESCE(fg.name, fg.code) AS recipe_name
         FROM recipes r
         LEFT JOIN finished_goods fg ON fg.id = r.finished_good_id
@@ -259,6 +260,7 @@ const createRecipeRepository = (db: DbExecutor): FoodInventoryRepositories['reci
       finishedGoodId: String(recipeRow.finished_good_id),
       name: String(recipeRow.recipe_name ?? 'Recipe'),
       versionNo: Number(recipeRow.version_no),
+      lossRatePercent: Number(recipeRow.loss_rate_percent ?? 0),
       items: itemsResult.rows.map((item) => ({
         materialId: String(item.material_id),
         qtyPerUnit: Number(item.qty_per_unit)
@@ -303,15 +305,16 @@ const createRecipeRepository = (db: DbExecutor): FoodInventoryRepositories['reci
     await db.query(
       `
         INSERT INTO recipes (
-          id, plant_id, finished_good_id, version_no, status, effective_from, created_at, updated_at
+          id, plant_id, finished_good_id, version_no, status, effective_from, loss_rate_percent, created_at, updated_at
         )
-        VALUES ($1, $2, $3, $4, 'ACTIVE', CURRENT_DATE, now(), now())
+        VALUES ($1, $2, $3, $4, 'ACTIVE', CURRENT_DATE, $5, now(), now())
         ON CONFLICT (id)
         DO UPDATE SET
           version_no = EXCLUDED.version_no,
+          loss_rate_percent = EXCLUDED.loss_rate_percent,
           updated_at = now()
       `,
-      [recipe.id, recipe.plantId, recipe.finishedGoodId, recipe.versionNo]
+      [recipe.id, recipe.plantId, recipe.finishedGoodId, recipe.versionNo, recipe.lossRatePercent]
     )
 
     await db.query('DELETE FROM recipe_items WHERE recipe_id = $1', [recipe.id])

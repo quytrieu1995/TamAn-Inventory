@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { apiClient, formatCurrencyVnd, type InventoryDetailReport, type MaterialPriceTrendReport, type MonthlySummary } from '../../lib/api'
+import TablePageSizeControl from '../../components/TablePageSizeControl'
 
 const toMonthKey = (date: Date) => `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
 const toDateKey = (date: Date) => date.toISOString().slice(0, 10)
@@ -37,6 +38,7 @@ const ReportsPage = () => {
   const [toDate, setToDate] = useState(() => buildDefaultRange('month').toDate)
   const [priceTrendReport, setPriceTrendReport] = useState<MaterialPriceTrendReport | null>(null)
   const [selectedMaterialId, setSelectedMaterialId] = useState('')
+  const [tablePageSize, setTablePageSize] = useState<10 | 20 | 50>(10)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -112,6 +114,14 @@ const ReportsPage = () => {
       return `${x},${y}`
     }).join(' ')
   }, [selectedSeries])
+
+  const visibleMaterialRows = useMemo(() => {
+    return inventoryDetail?.materials.slice(0, tablePageSize) ?? []
+  }, [inventoryDetail?.materials, tablePageSize])
+
+  const visibleFinishedGoodRows = useMemo(() => {
+    return inventoryDetail?.finishedGoods.slice(0, tablePageSize) ?? []
+  }, [inventoryDetail?.finishedGoods, tablePageSize])
 
   return (
     <main className="app-shell flex flex-col gap-4 py-4 md:gap-6 md:py-6">
@@ -285,6 +295,9 @@ const ReportsPage = () => {
               <h2 className="text-lg font-semibold">Báo cáo nhập - xuất - tồn chi tiết nguyên liệu</h2>
               <p className="text-sm text-slate-500">Theo kỳ {inventoryDetail.monthKey}, chi tiết cho từng mã nguyên liệu</p>
             </div>
+            <div className="mb-3">
+              <TablePageSizeControl value={tablePageSize} onChange={setTablePageSize} />
+            </div>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-slate-200 text-sm">
                 <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
@@ -299,7 +312,7 @@ const ReportsPage = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {inventoryDetail.materials.map((row) => (
+                  {visibleMaterialRows.map((row) => (
                     <tr key={row.materialId} className="bg-white">
                       <td className="px-3 py-2 font-medium">{row.code}</td>
                       <td className="px-3 py-2">{row.name}</td>
@@ -322,6 +335,9 @@ const ReportsPage = () => {
               <h2 className="text-lg font-semibold">Báo cáo nhập - xuất - tồn chi tiết thành phẩm</h2>
               <p className="text-sm text-slate-500">Theo kỳ {inventoryDetail.monthKey}, chi tiết cho từng mã thành phẩm</p>
             </div>
+            <div className="mb-3">
+              <TablePageSizeControl value={tablePageSize} onChange={setTablePageSize} />
+            </div>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-slate-200 text-sm">
                 <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
@@ -335,7 +351,7 @@ const ReportsPage = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {inventoryDetail.finishedGoods.map((row) => (
+                  {visibleFinishedGoodRows.map((row) => (
                     <tr key={row.finishedGoodId} className="bg-white">
                       <td className="px-3 py-2 font-medium">{row.code}</td>
                       <td className="px-3 py-2">{row.name}</td>

@@ -11,6 +11,7 @@ import {
   type ProductionOrderRow
 } from '../../lib/api'
 import { useSession } from '../../hooks/use-session'
+import TablePageSizeControl from '../../components/TablePageSizeControl'
 
 type CreateOrderLine = {
   id: string
@@ -54,6 +55,7 @@ const FinishedGoodsPage = () => {
   const [cancelingIssue, setCancelingIssue] = useState<FinishedGoodIssueRow | null>(null)
   const [cancelReason, setCancelReason] = useState('')
   const [inventoryReferenceNo, setInventoryReferenceNo] = useState(`FG-${Date.now()}`)
+  const [tablePageSize, setTablePageSize] = useState<10 | 20 | 50>(10)
   const [actualQtyByOrderId, setActualQtyByOrderId] = useState<Record<string, string>>({})
   const [processingOrderId, setProcessingOrderId] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<string | null>(null)
@@ -97,6 +99,8 @@ const FinishedGoodsPage = () => {
     () => finishedGoodStocks.reduce((sum, stock) => sum + stock.quantityOnHand, 0),
     [finishedGoodStocks]
   )
+  const visibleFinishedGoodStocks = useMemo(() => finishedGoodStocks.slice(0, tablePageSize), [finishedGoodStocks, tablePageSize])
+  const visibleIssueRows = useMemo(() => issueRows.slice(0, tablePageSize), [issueRows, tablePageSize])
   const finishedGoodMap = useMemo(() => {
     return new Map(finishedGoods.map((item) => [item.id, item]))
   }, [finishedGoods])
@@ -437,6 +441,9 @@ const FinishedGoodsPage = () => {
           <div className="mb-3 rounded-lg bg-slate-50 p-3 text-sm">
             Tổng tồn thành phẩm hiện tại: <span className="font-semibold">{totalStockQty}</span>
           </div>
+          <div className="mb-3">
+            <TablePageSizeControl value={tablePageSize} onChange={setTablePageSize} />
+          </div>
 
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-slate-200 text-sm">
@@ -449,7 +456,7 @@ const FinishedGoodsPage = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {finishedGoodStocks.map((stock) => (
+                {visibleFinishedGoodStocks.map((stock) => (
                   <tr key={stock.finishedGoodId} className="bg-white">
                     <td className="px-3 py-3 font-medium">{stock.code}</td>
                     <td className="px-3 py-3">{stock.name}</td>
@@ -457,7 +464,7 @@ const FinishedGoodsPage = () => {
                     <td className="px-3 py-3 text-right font-semibold">{stock.quantityOnHand}</td>
                   </tr>
                 ))}
-                {finishedGoodStocks.length === 0 && (
+                {visibleFinishedGoodStocks.length === 0 && (
                   <tr className="bg-white">
                     <td colSpan={4} className="px-3 py-4 text-center text-slate-500">
                       Chưa có tồn kho thành phẩm
@@ -579,6 +586,9 @@ const FinishedGoodsPage = () => {
               Xuất kho thành phẩm
             </button>
           </div>
+          <div className="mb-3">
+            <TablePageSizeControl value={tablePageSize} onChange={setTablePageSize} />
+          </div>
 
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-slate-200 text-sm">
@@ -596,7 +606,7 @@ const FinishedGoodsPage = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {issueRows.map((row) => (
+                {visibleIssueRows.map((row) => (
                   <tr key={row.id} className="bg-white">
                     <td className="px-3 py-3">{new Date(row.movedAt).toLocaleString('vi-VN')}</td>
                     <td className="px-3 py-3 font-medium">{row.code}</td>
@@ -622,7 +632,7 @@ const FinishedGoodsPage = () => {
                     </td>
                   </tr>
                 ))}
-                {issueRows.length === 0 && (
+                {visibleIssueRows.length === 0 && (
                   <tr className="bg-white">
                     <td colSpan={9} className="px-3 py-4 text-center text-slate-500">
                       Chưa có lệnh xuất kho thành phẩm

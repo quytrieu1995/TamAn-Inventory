@@ -78,6 +78,15 @@ const ensureFinishedGoodsUnitPriceColumn = async (pool: RouterDependencies['pool
   )
 }
 
+const ensureRecipeLossRateColumn = async (pool: RouterDependencies['pool']) => {
+  await pool.query(
+    `
+      ALTER TABLE recipes
+      ADD COLUMN IF NOT EXISTS loss_rate_percent NUMERIC(5, 2) NOT NULL DEFAULT 0
+    `
+  )
+}
+
 const PERMISSION_CATALOG: Array<{ code: string, description: string }> = [
   { code: 'material.view', description: 'Xem nguyên liệu' },
   { code: 'material.create', description: 'Thêm nguyên liệu' },
@@ -385,6 +394,7 @@ export const createRouter = (dependencies: RouterDependencies) => {
 
   router.get('/recipes/:id', asyncHandler(async (request, response) => {
     const auth = await getAuthContext(request)
+    await ensureRecipeLossRateColumn(pool)
     const recipe = await services.recipeService.getRecipeById(auth, String(request.params.id))
     return response.json(toSuccessResponse(recipe))
   }))
@@ -903,9 +913,11 @@ export const createRouter = (dependencies: RouterDependencies) => {
   router.post('/recipes', asyncHandler(async (request, response) => {
     const auth = await getAuthContext(request)
     await ensureFinishedGoodsUnitPriceColumn(pool)
+    await ensureRecipeLossRateColumn(pool)
     const schema = z.object({
       id: idSchema,
       name: z.string().min(1),
+      lossRatePercent: z.number().min(0).max(99.99).optional(),
       product: z.object({
         code: z.string().min(1),
         name: z.string().min(1),
@@ -936,6 +948,7 @@ export const createRouter = (dependencies: RouterDependencies) => {
         plantId: auth.plantId,
         finishedGoodId: String(finishedGoodResult.rows[0].id),
         name: payload.name,
+        lossRatePercent: payload.lossRatePercent ?? 0,
         items: payload.items
       })
     })
@@ -946,8 +959,10 @@ export const createRouter = (dependencies: RouterDependencies) => {
   router.put('/recipes/:id', asyncHandler(async (request, response) => {
     const auth = await getAuthContext(request)
     await ensureFinishedGoodsUnitPriceColumn(pool)
+    await ensureRecipeLossRateColumn(pool)
     const schema = z.object({
       name: z.string().min(1),
+      lossRatePercent: z.number().min(0).max(99.99).optional(),
       productName: z.string().min(1).optional(),
       productUom: finishedGoodUomSchema.optional(),
       productUnitPrice: z.number().nonnegative().optional(),
@@ -1780,12 +1795,14 @@ export const createRouter = (dependencies: RouterDependencies) => {
     const auth = await getAuthContext(request)
     requirePermission(auth, 'recipe.view')
     await ensureFinishedGoodsUnitPriceColumn(pool)
+    await ensureRecipeLossRateColumn(pool)
     const result = await pool.query(
       `
         SELECT
           r.id,
           r.finished_good_id,
           r.version_no,
+          r.loss_rate_percent,
           COALESCE(fg.name, fg.code) AS name,
           fg.code AS product_code,
           fg.name AS product_name,
@@ -1804,6 +1821,7 @@ export const createRouter = (dependencies: RouterDependencies) => {
       id: String(row.id),
       finishedGoodId: String(row.finished_good_id),
       versionNo: Number(row.version_no),
+      lossRatePercent: Number(row.loss_rate_percent ?? 0),
       name: String(row.name),
       productCode: row.product_code ? String(row.product_code) : '',
       productName: row.product_name ? String(row.product_name) : '',
@@ -1848,6 +1866,7 @@ export const createRouter = (dependencies: RouterDependencies) => {
 
   router.post('/production-orders', asyncHandler(async (request, response) => {
     const auth = await getAuthContext(request)
+    await ensureRecipeLossRateColumn(pool)
     const schema = z.object({
       warehouseId: idSchema,
       orderNo: z.string().min(1),
@@ -1876,6 +1895,7 @@ export const createRouter = (dependencies: RouterDependencies) => {
 
   router.post('/production-orders/:id/complete', asyncHandler(async (request, response) => {
     const auth = await getAuthContext(request)
+    await ensureRecipeLossRateColumn(pool)
     const schema = z.object({
       actualQty: z.number().positive(),
       movedAt: z.string().datetime(),

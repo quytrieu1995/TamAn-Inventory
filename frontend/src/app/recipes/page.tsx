@@ -7,6 +7,7 @@ import {
   type MasterRecipe
 } from '../../lib/api'
 import { useSession } from '../../hooks/use-session'
+import TablePageSizeControl from '../../components/TablePageSizeControl'
 
 type RecipeItemDraft = {
   materialId: string
@@ -22,6 +23,24 @@ const FINISHED_GOOD_UOM_OPTIONS: Array<{ value: FinishedGoodUom, label: string }
   { value: 'goi', label: 'Gói' }
 ]
 
+const calculateExpectedOutputQty = (items: RecipeItemDraft[], lossRatePercent: number) => {
+  const totalInputQty = items.reduce((sum, item) => {
+    const qty = Number(item.qtyPerUnit)
+    if (!Number.isFinite(qty) || qty <= 0) {
+      return sum
+    }
+    return sum + qty
+  }, 0)
+
+  const normalizedLossRatePercent = Math.max(0, Math.min(lossRatePercent, 99.99))
+  const expectedOutputQty = totalInputQty * (1 - normalizedLossRatePercent / 100)
+
+  return {
+    totalInputQty,
+    expectedOutputQty
+  }
+}
+
 const RecipesPage = () => {
   const { session } = useSession()
   const [materials, setMaterials] = useState<MasterMaterial[]>([])
@@ -30,6 +49,7 @@ const RecipesPage = () => {
   const [productName, setProductName] = useState('')
   const [productUom, setProductUom] = useState<FinishedGoodUom>('goi')
   const [productUnitPrice, setProductUnitPrice] = useState('0')
+  const [productLossRatePercent, setProductLossRatePercent] = useState('0')
   const [recipeItems, setRecipeItems] = useState<RecipeItemDraft[]>([])
   const [showCreateProductModal, setShowCreateProductModal] = useState(false)
   const [searchKeyword, setSearchKeyword] = useState('')
@@ -39,9 +59,12 @@ const RecipesPage = () => {
   const [editingProductName, setEditingProductName] = useState('')
   const [editingProductUom, setEditingProductUom] = useState<FinishedGoodUom>('goi')
   const [editingProductUnitPrice, setEditingProductUnitPrice] = useState('0')
+  const [editingProductLossRatePercent, setEditingProductLossRatePercent] = useState('0')
   const [editingRecipeItems, setEditingRecipeItems] = useState<RecipeItemDraft[]>([])
   const [detailRecipeId, setDetailRecipeId] = useState<string | null>(null)
+  const [detailLossRatePercent, setDetailLossRatePercent] = useState(0)
   const [detailRecipeItems, setDetailRecipeItems] = useState<RecipeItemDraft[]>([])
+  const [tablePageSize, setTablePageSize] = useState<10 | 20 | 50>(10)
   const [loadingRecipeDetail, setLoadingRecipeDetail] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -122,6 +145,18 @@ const RecipesPage = () => {
     return buildValidationErrors(editingRecipeItems)
   }, [editingRecipeItems])
 
+  const createLossProjection = useMemo(() => {
+    return calculateExpectedOutputQty(recipeItems, Number(productLossRatePercent))
+  }, [productLossRatePercent, recipeItems])
+
+  const editingLossProjection = useMemo(() => {
+    return calculateExpectedOutputQty(editingRecipeItems, Number(editingProductLossRatePercent))
+  }, [editingProductLossRatePercent, editingRecipeItems])
+
+  const detailLossProjection = useMemo(() => {
+    return calculateExpectedOutputQty(detailRecipeItems, detailLossRatePercent)
+  }, [detailLossRatePercent, detailRecipeItems])
+
   const filteredRecipes = useMemo(() => {
     const keyword = searchKeyword.trim().toLowerCase()
     return recipes.filter((recipe) => {
@@ -136,6 +171,8 @@ const RecipesPage = () => {
       return matchKeyword && matchStatus
     })
   }, [recipes, searchKeyword, statusFilter])
+  const visibleRecipes = useMemo(() => filteredRecipes.slice(0, tablePageSize), [filteredRecipes, tablePageSize])
+  const visibleDetailRecipeItems = useMemo(() => detailRecipeItems.slice(0, tablePageSize), [detailRecipeItems, tablePageSize])
 
   const handleRecipeItemChange = (index: number, field: keyof RecipeItemDraft, value: string) => {
     setRecipeItems((previous) => {
@@ -218,6 +255,11 @@ const RecipesPage = () => {
       setFeedback('Đơn giá sản phẩm phải là số không âm')
       return
     }
+    const parsedLossRatePercent = Number(productLossRatePercent)
+    if (!Number.isFinite(parsedLossRatePercent) || parsedLossRatePercent < 0 || parsedLossRatePercent >= 100) {
+      setFeedback('Tỷ lệ hao hụt phải là số từ 0 đến nhỏ hơn 100 (%)')
+      return
+    }
     if (recipeItems.length === 0) {
       setFeedback('BOM cần ít nhất một nguyên liệu')
       return
@@ -233,6 +275,7 @@ const RecipesPage = () => {
       await apiClient.createRecipe({
         id: crypto.randomUUID(),
         name: `${productCode.trim()} - ${productName.trim()}`,
+        lossRatePercent: parsedLossRatePercent,
         product: {
           code: productCode.trim(),
           name: productName.trim(),
@@ -248,6 +291,7 @@ const RecipesPage = () => {
       setProductName('')
       setProductUom('goi')
       setProductUnitPrice('0')
+      setProductLossRatePercent('0')
       if (activeMaterials.length > 0) {
         setRecipeItems([
           {
@@ -273,6 +317,7 @@ const RecipesPage = () => {
     setProductName('')
     setProductUom('goi')
     setProductUnitPrice('0')
+    setProductLossRatePercent('0')
     if (activeMaterials.length > 0) {
       setRecipeItems([
         {
@@ -310,6 +355,7 @@ const RecipesPage = () => {
         setEditingProductUom('goi')
       }
       setEditingProductUnitPrice(String(recipeSummary?.productUnitPrice ?? 0))
+      setEditingProductLossRatePercent(String(recipeSummary?.lossRatePercent ?? 0))
       setEditingRecipeItems(detail.items.map((item) => ({
         materialId: item.materialId,
         qtyPerUnit: String(item.qtyPerUnit)
@@ -327,6 +373,7 @@ const RecipesPage = () => {
     try {
       const detail = await apiClient.getRecipeById(recipeId)
       setDetailRecipeId(detail.id)
+      setDetailLossRatePercent(detail.lossRatePercent ?? 0)
       setDetailRecipeItems(detail.items.map((item) => ({
         materialId: item.materialId,
         qtyPerUnit: String(item.qtyPerUnit)
@@ -344,6 +391,7 @@ const RecipesPage = () => {
     setEditingProductName('')
     setEditingProductUom('goi')
     setEditingProductUnitPrice('0')
+    setEditingProductLossRatePercent('0')
     setEditingRecipeItems([])
   }
 
@@ -373,12 +421,18 @@ const RecipesPage = () => {
       setFeedback('Đơn giá sản phẩm phải là số không âm')
       return
     }
+    const parsedEditingLossRatePercent = Number(editingProductLossRatePercent)
+    if (!Number.isFinite(parsedEditingLossRatePercent) || parsedEditingLossRatePercent < 0 || parsedEditingLossRatePercent >= 100) {
+      setFeedback('Tỷ lệ hao hụt phải là số từ 0 đến nhỏ hơn 100 (%)')
+      return
+    }
 
     setSubmitting(true)
     setFeedback(null)
     try {
       await apiClient.updateRecipe(editingRecipeId, {
         name: editingRecipeName.trim() || 'BOM sản phẩm',
+        lossRatePercent: parsedEditingLossRatePercent,
         productName: editingProductName.trim(),
         productUom: editingProductUom,
         productUnitPrice: parsedEditingUnitPrice,
@@ -415,6 +469,7 @@ const RecipesPage = () => {
       await loadData()
       if (detailRecipeId) {
         setDetailRecipeId(null)
+        setDetailLossRatePercent(0)
         setDetailRecipeItems([])
       }
       if (editingRecipeId) {
@@ -498,6 +553,9 @@ const RecipesPage = () => {
             <button type="button" onClick={() => setStatusFilter('INACTIVE')} className={`rounded-lg px-3 py-1 text-xs ${statusFilter === 'INACTIVE' ? 'bg-rose-600 text-white' : 'bg-slate-100'}`}>Ngừng hoạt động</button>
           </div>
         </div>
+        <div className="mb-3">
+          <TablePageSizeControl value={tablePageSize} onChange={setTablePageSize} />
+        </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
@@ -506,12 +564,13 @@ const RecipesPage = () => {
                 <th className="px-3 py-2">BOM ID</th>
                 <th className="px-3 py-2">Trạng thái</th>
                 <th className="px-3 py-2 text-right">Đơn giá</th>
+                <th className="px-3 py-2 text-right">Hao hụt (%)</th>
                 <th className="px-3 py-2">Phiên bản</th>
                 <th className="px-3 py-2">Hành động</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredRecipes.map((recipe) => (
+              {visibleRecipes.map((recipe) => (
                 <tr key={recipe.id} className={`bg-white ${recipe.productIsActive ? '' : 'opacity-70'}`}>
                   <td className="px-3 py-3">
                     <p>{recipe.productCode} - {recipe.productName}</p>
@@ -525,6 +584,7 @@ const RecipesPage = () => {
                     </span>
                   </td>
                   <td className="px-3 py-3 text-right">{recipe.productUnitPrice}</td>
+                  <td className="px-3 py-3 text-right">{recipe.lossRatePercent}</td>
                   <td className="px-3 py-3">
                     <span className="status-pill bg-indigo-100 text-indigo-700">v{recipe.versionNo}</span>
                   </td>
@@ -566,9 +626,9 @@ const RecipesPage = () => {
                   </td>
                 </tr>
               ))}
-              {filteredRecipes.length === 0 && (
+              {visibleRecipes.length === 0 && (
                 <tr className="bg-white">
-                  <td colSpan={6} className="px-3 py-4 text-center text-sm text-slate-500">
+                  <td colSpan={7} className="px-3 py-4 text-center text-sm text-slate-500">
                     Không tìm thấy sản phẩm phù hợp
                   </td>
                 </tr>
@@ -586,6 +646,7 @@ const RecipesPage = () => {
               type="button"
               onClick={() => {
                 setDetailRecipeId(null)
+                setDetailLossRatePercent(0)
                 setDetailRecipeItems([])
               }}
               className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs"
@@ -594,6 +655,13 @@ const RecipesPage = () => {
             </button>
           </div>
           <p className="mb-3 text-xs text-slate-500">BOM ID: {detailRecipeId}</p>
+          <p className="mb-3 text-xs text-slate-500">Tỷ lệ hao hụt: {detailLossRatePercent}%</p>
+          <p className="mb-3 text-xs text-slate-500">
+            Tổng NVL: {detailLossProjection.totalInputQty.toFixed(3)} | Thành phẩm sau hao hụt: {detailLossProjection.expectedOutputQty.toFixed(3)}
+          </p>
+          <div className="mb-3">
+            <TablePageSizeControl value={tablePageSize} onChange={setTablePageSize} />
+          </div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-slate-200 text-sm">
               <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
@@ -604,7 +672,7 @@ const RecipesPage = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {detailRecipeItems.map((item, index) => {
+                {visibleDetailRecipeItems.map((item, index) => {
                   const material = materialMap.get(item.materialId)
                   return (
                     <tr key={`${detailRecipeId}-${item.materialId}-${index}`} className="bg-white">
@@ -656,6 +724,17 @@ const RecipesPage = () => {
                 onChange={(event) => setEditingProductUnitPrice(event.target.value)}
               />
             </label>
+            <label className="text-sm">
+              <span>Tỷ lệ hao hụt (%)</span>
+              <input
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2"
+                value={editingProductLossRatePercent}
+                onChange={(event) => setEditingProductLossRatePercent(event.target.value)}
+              />
+            </label>
+            <p className="text-xs text-slate-500">
+              Tổng NVL: {editingLossProjection.totalInputQty.toFixed(3)} | Thành phẩm sau hao hụt: {editingLossProjection.expectedOutputQty.toFixed(3)}
+            </p>
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
               <div className="mb-2 flex items-center justify-between">
                 <p className="text-sm font-semibold">Thành phần nguyên liệu</p>
@@ -738,7 +817,7 @@ const RecipesPage = () => {
               </button>
             </div>
             <form onSubmit={handleCreateRecipe} className="grid grid-cols-1 gap-3">
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
                 <label className="text-sm">
                   <span>Mã sản phẩm mới</span>
                   <input className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2" value={productCode} onChange={(event) => setProductCode(event.target.value)} />
@@ -769,7 +848,18 @@ const RecipesPage = () => {
                     onChange={(event) => setProductUnitPrice(event.target.value)}
                   />
                 </label>
+                <label className="text-sm">
+                  <span>Tỷ lệ hao hụt (%)</span>
+                  <input
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2"
+                    value={productLossRatePercent}
+                    onChange={(event) => setProductLossRatePercent(event.target.value)}
+                  />
+                </label>
               </div>
+              <p className="text-xs text-slate-500">
+                Tổng NVL: {createLossProjection.totalInputQty.toFixed(3)} | Thành phẩm sau hao hụt: {createLossProjection.expectedOutputQty.toFixed(3)}
+              </p>
 
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                 <div className="mb-2 flex items-center justify-between">
