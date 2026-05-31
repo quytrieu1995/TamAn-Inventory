@@ -267,6 +267,25 @@ const createRecipeRepository = (db: DbExecutor): FoodInventoryRepositories['reci
     }
   },
 
+  getLatestRecipeByFinishedGood: async (finishedGoodId) => {
+    const recipeResult = await db.query(
+      `
+        SELECT id
+        FROM recipes
+        WHERE finished_good_id = $1
+        ORDER BY version_no DESC, updated_at DESC
+        LIMIT 1
+      `,
+      [finishedGoodId]
+    )
+
+    if (recipeResult.rowCount === 0) {
+      return null
+    }
+
+    return createRecipeRepository(db).getRecipeById(String(recipeResult.rows[0].id))
+  },
+
   getLatestVersionByFinishedGood: async (finishedGoodId) => {
     const result = await db.query(
       `

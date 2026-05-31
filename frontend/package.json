@@ -4,8 +4,8 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "npm run dev:stable",
-    "dev:fast": "next dev -H 127.0.0.1 -p 3000",
-    "dev:stable": "WATCHPACK_POLLING=true CHOKIDAR_USEPOLLING=true next dev -H 127.0.0.1 -p 3000",
+    "dev:fast": "rm -rf .next-dev && next dev -H 127.0.0.1 -p 3000",
+    "dev:stable": "rm -rf .next-dev && WATCHPACK_POLLING=true CHOKIDAR_USEPOLLING=true next dev -H 127.0.0.1 -p 3000",
     "build": "next build",
     "start": "next start -H 127.0.0.1 -p 3000"
   },

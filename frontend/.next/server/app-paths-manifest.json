@@ -1,7 +1,11 @@
 {
-  "/materials/page": "app/materials/page.js",
+  "/_not-found/page": "app/_not-found/page.js",
   "/dashboard/page": "app/dashboard/page.js",
-  "/finished-goods/page": "app/finished-goods/page.js",
   "/suppliers/page": "app/suppliers/page.js",
-  "/recipes/page": "app/recipes/page.js"
+  "/recipes/page": "app/recipes/page.js",
+  "/users/page": "app/users/page.js",
+  "/materials/page": "app/materials/page.js",
+  "/reports/page": "app/reports/page.js",
+  "/finished-goods/page": "app/finished-goods/page.js",
+  "/page": "app/page.js"
 }

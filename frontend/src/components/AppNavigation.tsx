@@ -10,8 +10,7 @@ const navItems = [
   { href: '/materials', label: 'Nguyên liệu', requiredPermission: null },
   { href: '/finished-goods', label: 'Sản xuất', requiredPermission: null },
   { href: '/recipes', label: 'Công thức', requiredPermission: 'recipe.view' },
-  { href: '/reports', label: 'Báo cáo', requiredPermission: 'report.view' },
-  { href: '/users', label: 'Người dùng', requiredPermission: 'user.manage' }
+  { href: '/reports', label: 'Báo cáo', requiredPermission: 'report.view' }
 ] as const
 
 const getLinkClassName = (isActive: boolean) => {

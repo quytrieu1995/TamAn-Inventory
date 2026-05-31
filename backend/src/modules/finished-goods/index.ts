@@ -37,13 +37,12 @@ export const createFinishedGoodsService = ({
       warehouseId: string
       orderNo: string
       finishedGoodId: string
-      recipeId: string
       plannedQty: number
     }
   ) => {
     requirePermission(auth, 'production.create')
     requireWarehouseAccess(auth, input.warehouseId)
-    const recipe = await recipeRepository.getRecipeById(input.recipeId)
+    const recipe = await recipeRepository.getLatestRecipeByFinishedGood(input.finishedGoodId)
     if (!recipe) {
       throw new NotFoundError('Recipe')
     }
@@ -54,21 +53,20 @@ export const createFinishedGoodsService = ({
       warehouseId: input.warehouseId,
       orderNo: input.orderNo,
       finishedGoodId: input.finishedGoodId,
-      recipeId: input.recipeId,
+      recipeId: recipe.id,
       plannedQty: input.plannedQty,
       actualQty: 0,
-      status: 'RELEASED',
+      status: 'DRAFT',
       createdAt: new Date().toISOString()
     }
     await productionRepository.saveProductionOrder(order)
     return order
   }
 
-  const consumeMaterialsForOrder = async (
+  const approveProductionOrder = async (
     auth: AuthContext,
     input: {
       orderId: string
-      movedAt: string
     }
   ) => {
     requirePermission(auth, 'production.create')
@@ -78,23 +76,25 @@ export const createFinishedGoodsService = ({
     }
     requireWarehouseAccess(auth, order.warehouseId)
 
-    const recipe = await recipeRepository.getRecipeById(order.recipeId)
-    if (!recipe) {
-      throw new NotFoundError('Recipe')
+    if (order.status === 'COMPLETED') {
+      throw new ConflictError('Production order is already completed')
     }
 
-    const issueItems = recipe.items.map((item) => ({
-      materialId: item.materialId,
-      quantity: Number((item.qtyPerUnit * order.plannedQty).toFixed(3))
-    }))
+    if (order.status === 'CANCELLED') {
+      throw new ConflictError('Production order was cancelled')
+    }
 
-    return inventoryService.issueMaterialsFifo(auth, {
-      warehouseId: order.warehouseId,
-      referenceType: 'PRODUCTION',
-      referenceId: order.id,
-      movedAt: input.movedAt,
-      items: issueItems
-    })
+    if (order.status === 'RELEASED') {
+      return order
+    }
+
+    const approvedOrder: ProductionOrder = {
+      ...order,
+      status: 'RELEASED'
+    }
+
+    await productionRepository.saveProductionOrder(approvedOrder)
+    return approvedOrder
   }
 
   const completeProductionOrder = async (
@@ -116,6 +116,28 @@ export const createFinishedGoodsService = ({
     if (input.actualQty <= 0) {
       throw new ConflictError('Actual quantity must be greater than zero')
     }
+
+    if (order.status !== 'RELEASED' && order.status !== 'IN_PROGRESS') {
+      throw new ConflictError('Production order must be approved before completion')
+    }
+
+    const recipe = await recipeRepository.getRecipeById(order.recipeId)
+    if (!recipe) {
+      throw new NotFoundError('Recipe')
+    }
+
+    const issueItems = recipe.items.map((item) => ({
+      materialId: item.materialId,
+      quantity: Number((item.qtyPerUnit * input.actualQty).toFixed(3))
+    }))
+
+    const consumption = await inventoryService.issueMaterialsFifo(auth, {
+      warehouseId: order.warehouseId,
+      referenceType: 'PRODUCTION',
+      referenceId: order.id,
+      movedAt: input.movedAt,
+      items: issueItems
+    })
 
     const completedOrder: ProductionOrder = {
       ...order,
@@ -141,13 +163,14 @@ export const createFinishedGoodsService = ({
     await inventoryRepository.saveMovement(outputMovement)
     return {
       order: completedOrder,
+      consumption,
       movement: outputMovement
     }
   }
 
   return {
     createProductionOrder,
-    consumeMaterialsForOrder,
+    approveProductionOrder,
     completeProductionOrder
   }
 }

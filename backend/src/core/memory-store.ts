@@ -66,6 +66,13 @@ export const createMemoryStore = (seedData: SeedData = {}): FoodInventoryReposit
     },
     recipe: {
       getRecipeById: async (recipeId) => recipes.get(recipeId) ?? null,
+      getLatestRecipeByFinishedGood: async (finishedGoodId) => {
+        const matched = Array.from(recipes.values()).filter((recipe) => recipe.finishedGoodId === finishedGoodId)
+        if (matched.length === 0) {
+          return null
+        }
+        return matched.sort((left, right) => right.versionNo - left.versionNo)[0]
+      },
       getLatestVersionByFinishedGood: async (finishedGoodId) => {
         const matched = Array.from(recipes.values()).filter((recipe) => recipe.finishedGoodId === finishedGoodId)
         return matched.reduce((maximum, recipe) => Math.max(maximum, recipe.versionNo), 0)

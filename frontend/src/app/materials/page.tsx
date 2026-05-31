@@ -27,6 +27,10 @@ type MaterialFormState = {
   maxStorageDays: string
 }
 
+type StatusFilter = 'ALL' | 'ACTIVE' | 'INACTIVE'
+
+const MATERIAL_UOM_OPTIONS = ['kg', 'g', 'ml', 'l'] as const
+
 const MaterialsPage = () => {
   const { session } = useSession()
   const [materialRows, setMaterialRows] = useState<MaterialStockRow[]>([])
@@ -49,6 +53,9 @@ const MaterialsPage = () => {
     maxStorageDays: '30'
   })
   const [editingMaterialId, setEditingMaterialId] = useState<string | null>(null)
+  const [showActionModal, setShowActionModal] = useState(false)
+  const [showMaterialModal, setShowMaterialModal] = useState(false)
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL')
 
   const canReceive = session?.permissions.includes('inventory.receive') ?? false
   const canIssue = session?.permissions.includes('inventory.issue') ?? false
@@ -64,16 +71,25 @@ const MaterialsPage = () => {
     setMaterialRows(stocks)
     setMaterials(masters)
     setSuppliers(supplierRows)
-    if (!selectedMaterialId && masters.length > 0) {
-      setSelectedMaterialId(masters[0].id)
+    if (masters.length > 0) {
+      const selectedStillActive = masters.some((material) => material.id === selectedMaterialId && material.isActive)
+      if (!selectedStillActive) {
+        const activeMaterial = masters.find((material) => material.isActive)
+        setSelectedMaterialId(activeMaterial ? activeMaterial.id : '')
+      }
     }
     if (!supplierId && supplierRows.length > 0) {
       setSupplierId(supplierRows[0].id)
     }
     if (receiptLines.length === 0 && masters.length > 0) {
+      const activeMaterial = masters.find((material) => material.isActive)
+      if (!activeMaterial) {
+        setReceiptLines([])
+        return
+      }
       setReceiptLines([
         {
-          materialId: masters[0].id,
+          materialId: activeMaterial.id,
           batchNo: `BATCH-${Date.now()}`,
           quantity: '10',
           unitPrice: '20000'
@@ -89,6 +105,16 @@ const MaterialsPage = () => {
   }, [])
 
   const totalSku = useMemo(() => new Set(materialRows.map((row) => row.code)).size, [materialRows])
+  const activeMaterials = useMemo(() => materials.filter((material) => material.isActive), [materials])
+  const filteredMaterials = useMemo(() => {
+    if (statusFilter === 'ACTIVE') {
+      return materials.filter((material) => material.isActive)
+    }
+    if (statusFilter === 'INACTIVE') {
+      return materials.filter((material) => !material.isActive)
+    }
+    return materials
+  }, [materials, statusFilter])
   const lowStockRows = useMemo(
     () => materialRows.filter((row) => row.quantityOnHand <= row.minimumStock),
     [materialRows]
@@ -110,13 +136,13 @@ const MaterialsPage = () => {
   }
 
   const handleAddReceiptLine = () => {
-    if (!materials.length) {
+    if (!activeMaterials.length) {
       return
     }
     setReceiptLines((previous) => [
       ...previous,
       {
-        materialId: materials[0].id,
+        materialId: activeMaterials[0].id,
         batchNo: `BATCH-${Date.now()}`,
         quantity: '10',
         unitPrice: '20000'
@@ -215,10 +241,33 @@ const MaterialsPage = () => {
         maxStorageDays: '30'
       })
       setEditingMaterialId(null)
+      setShowMaterialModal(false)
       await loadData()
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : 'Không thể lưu nguyên liệu')
     }
+  }
+
+  const resetMaterialForm = () => {
+    setEditingMaterialId(null)
+    setMaterialForm({
+      code: '',
+      name: '',
+      uom: 'kg',
+      minimumStock: '0',
+      maxStorageDays: '30'
+    })
+  }
+
+  const handleOpenCreateMaterialModal = () => {
+    resetMaterialForm()
+    setFeedback(null)
+    setShowMaterialModal(true)
+  }
+
+  const handleCloseMaterialModal = () => {
+    setShowMaterialModal(false)
+    resetMaterialForm()
   }
 
   const handleEditMaterial = (material: MasterMaterial) => {
@@ -230,6 +279,8 @@ const MaterialsPage = () => {
       minimumStock: String(material.minimumStock),
       maxStorageDays: String(material.maxStorageDays)
     })
+    setFeedback(null)
+    setShowMaterialModal(true)
   }
 
   const handleDeleteMaterial = async (materialId: string) => {
@@ -242,11 +293,43 @@ const MaterialsPage = () => {
     }
   }
 
+  const handleToggleMaterialStatus = async (materialId: string, isActive: boolean) => {
+    try {
+      await apiClient.updateMaterialStatus(materialId, !isActive)
+      setMaterials((previous) => previous.map((material) => {
+        if (material.id !== materialId) {
+          return material
+        }
+        return {
+          ...material,
+          isActive: !isActive
+        }
+      }))
+      setFeedback(!isActive ? 'Đã kích hoạt nguyên liệu' : 'Đã chuyển nguyên liệu sang ngừng hoạt động')
+      await loadData()
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : 'Không thể cập nhật trạng thái nguyên liệu')
+    }
+  }
+
+  const handleOpenActionModal = (mode: ActionMode) => {
+    setActiveMode(mode)
+    setFeedback(null)
+    setShowActionModal(true)
+  }
+
+  const handleCloseActionModal = () => {
+    setShowActionModal(false)
+  }
+
   const canSubmit = activeMode === 'RECEIPT'
     ? canReceive
     : activeMode === 'ISSUE'
       ? canIssue
       : canAdjust
+  const hasValidSelection = activeMode === 'RECEIPT'
+    ? activeMaterials.length > 0
+    : activeMaterials.some((material) => material.id === selectedMaterialId)
 
   return (
     <main className="app-shell flex flex-col gap-4 py-4 md:gap-6 md:py-6">
@@ -275,112 +358,34 @@ const MaterialsPage = () => {
       </section>
 
       <section className="surface-card p-4">
-        <div className="mb-3 flex flex-wrap gap-2">
-          <button type="button" onClick={() => setActiveMode('RECEIPT')} className={`rounded-lg px-3 py-2 text-sm ${activeMode === 'RECEIPT' ? 'bg-blue-600 text-white' : 'bg-slate-100'}`}>Phiếu nhập</button>
-          <button type="button" onClick={() => setActiveMode('ISSUE')} className={`rounded-lg px-3 py-2 text-sm ${activeMode === 'ISSUE' ? 'bg-blue-600 text-white' : 'bg-slate-100'}`}>Phiếu xuất</button>
-          <button type="button" onClick={() => setActiveMode('DISPOSAL')} className={`rounded-lg px-3 py-2 text-sm ${activeMode === 'DISPOSAL' ? 'bg-blue-600 text-white' : 'bg-slate-100'}`}>Phiếu huỷ</button>
+        <h2 className="mb-3 text-base font-semibold">Phiếu nhập / xuất / huỷ</h2>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => handleOpenActionModal('RECEIPT')} disabled={!canReceive} className="rounded-lg bg-blue-600 px-3 py-2 text-sm text-white disabled:opacity-50">Phiếu nhập</button>
+          <button type="button" onClick={() => handleOpenActionModal('ISSUE')} disabled={!canIssue} className="rounded-lg bg-blue-600 px-3 py-2 text-sm text-white disabled:opacity-50">Phiếu xuất</button>
+          <button type="button" onClick={() => handleOpenActionModal('DISPOSAL')} disabled={!canAdjust} className="rounded-lg bg-blue-600 px-3 py-2 text-sm text-white disabled:opacity-50">Phiếu huỷ</button>
         </div>
-
-        <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          {activeMode !== 'RECEIPT' && (
-            <>
-              <label className="text-sm">
-                <span>Mã nguyên liệu</span>
-                <select
-                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2"
-                  value={selectedMaterialId}
-                  onChange={(event) => setSelectedMaterialId(event.target.value)}
-                >
-                  {materials.map((material) => (
-                    <option key={material.id} value={material.id}>
-                      {material.code} - {material.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="text-sm">
-                <span>Số lượng</span>
-                <input className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2" value={quantity} onChange={(event) => setQuantity(event.target.value)} />
-              </label>
-            </>
-          )}
-
-          {activeMode === 'RECEIPT' && (
-            <div className="md:col-span-2">
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                <label className="text-sm">
-                  <span>Nhà cung cấp</span>
-                  <select className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2" value={supplierId} onChange={(event) => setSupplierId(event.target.value)}>
-                    {suppliers.map((supplier) => (
-                      <option key={supplier.id} value={supplier.id}>
-                        {supplier.code} - {supplier.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="text-sm">
-                  <span>Số phiếu nhập</span>
-                  <input className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2" value={receiptNo} onChange={(event) => setReceiptNo(event.target.value)} />
-                </label>
-                <label className="text-sm">
-                  <span>Ghi chú</span>
-                  <input className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2" value={receiptNote} onChange={(event) => setReceiptNote(event.target.value)} />
-                </label>
-              </div>
-
-              <div className="mt-3 space-y-2">
-                {receiptLines.map((line, index) => (
-                  <div key={`${index}-${line.batchNo}`} className="grid grid-cols-1 gap-2 rounded-lg border border-slate-200 bg-white p-2 md:grid-cols-5">
-                    <select className="rounded-lg border border-slate-200 bg-white p-2 text-sm" value={line.materialId} onChange={(event) => handleReceiptLineChange(index, 'materialId', event.target.value)}>
-                      {materials.map((material) => (
-                        <option key={material.id} value={material.id}>
-                          {material.code}
-                        </option>
-                      ))}
-                    </select>
-                    <input className="rounded-lg border border-slate-200 bg-white p-2 text-sm" placeholder="Mã lô" value={line.batchNo} onChange={(event) => handleReceiptLineChange(index, 'batchNo', event.target.value)} />
-                    <input className="rounded-lg border border-slate-200 bg-white p-2 text-sm" placeholder="Số lượng" value={line.quantity} onChange={(event) => handleReceiptLineChange(index, 'quantity', event.target.value)} />
-                    <input className="rounded-lg border border-slate-200 bg-white p-2 text-sm" placeholder="Đơn giá" value={line.unitPrice} onChange={(event) => handleReceiptLineChange(index, 'unitPrice', event.target.value)} />
-                    <button type="button" onClick={() => handleRemoveReceiptLine(index)} className="rounded-lg border border-rose-200 px-3 py-2 text-sm text-rose-600">Xoá dòng</button>
-                  </div>
-                ))}
-              </div>
-              <button type="button" onClick={handleAddReceiptLine} className="mt-2 rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                + Thêm dòng nguyên liệu
-              </button>
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={!canSubmit || submitting}
-            className="rounded-lg bg-gradient-to-r from-blue-600 to-cyan-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-          >
-            {submitting ? 'Đang xử lý...' : 'Thực hiện'}
-          </button>
-        </form>
-
-        {!canSubmit && (
+        {activeMaterials.length === 0 && (
           <p className="mt-2 rounded-lg bg-amber-50 p-2 text-sm text-amber-700">
-            Tài khoản hiện tại chưa được phân quyền cho thao tác này.
+            Không có nguyên liệu đang hoạt động để chọn cho phiếu nhập/xuất/huỷ.
           </p>
         )}
-        {feedback && <p className="mt-2 text-sm">{feedback}</p>}
       </section>
 
       <section className="surface-card p-4">
-        <h2 className="mb-3 text-base font-semibold">Thêm / sửa nguyên liệu</h2>
-        <form onSubmit={handleSubmitMaterialForm} className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          <input className="rounded-lg border border-slate-200 bg-white p-2 text-sm" placeholder="Mã NVL" value={materialForm.code} onChange={(event) => setMaterialForm((previous) => ({ ...previous, code: event.target.value }))} />
-          <input className="rounded-lg border border-slate-200 bg-white p-2 text-sm" placeholder="Tên NVL" value={materialForm.name} onChange={(event) => setMaterialForm((previous) => ({ ...previous, name: event.target.value }))} />
-          <input className="rounded-lg border border-slate-200 bg-white p-2 text-sm" placeholder="Đơn vị" value={materialForm.uom} onChange={(event) => setMaterialForm((previous) => ({ ...previous, uom: event.target.value }))} />
-          <input className="rounded-lg border border-slate-200 bg-white p-2 text-sm" placeholder="Tồn tối thiểu" value={materialForm.minimumStock} onChange={(event) => setMaterialForm((previous) => ({ ...previous, minimumStock: event.target.value }))} />
-          <input className="rounded-lg border border-slate-200 bg-white p-2 text-sm" placeholder="Số ngày lưu kho tối đa" value={materialForm.maxStorageDays} onChange={(event) => setMaterialForm((previous) => ({ ...previous, maxStorageDays: event.target.value }))} />
-          <button type="submit" disabled={!canManageMaterial} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
-            {editingMaterialId ? 'Cập nhật NVL' : 'Thêm NVL'}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-base font-semibold">Danh mục nguyên liệu</h2>
+            <p className="text-sm text-slate-500">Bấm nút để mở popup thêm mới nguyên liệu</p>
+          </div>
+          <button
+            type="button"
+            onClick={handleOpenCreateMaterialModal}
+            disabled={!canManageMaterial}
+            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            + Thêm NVL
           </button>
-        </form>
+        </div>
         {!canManageMaterial && <p className="mt-2 text-sm text-amber-700">Bạn không có quyền material.manage</p>}
       </section>
 
@@ -416,22 +421,185 @@ const MaterialsPage = () => {
       </section>
 
       <section className="surface-card p-4">
-        <h2 className="mb-3 text-base font-semibold">Danh mục nguyên liệu</h2>
+        <h2 className="mb-3 text-base font-semibold">Danh sách nguyên liệu</h2>
+        <div className="mb-3 flex flex-wrap gap-2">
+          <button type="button" onClick={() => setStatusFilter('ALL')} className={`rounded-lg px-3 py-1 text-xs ${statusFilter === 'ALL' ? 'bg-slate-900 text-white' : 'bg-slate-100'}`}>Tất cả</button>
+          <button type="button" onClick={() => setStatusFilter('ACTIVE')} className={`rounded-lg px-3 py-1 text-xs ${statusFilter === 'ACTIVE' ? 'bg-emerald-600 text-white' : 'bg-slate-100'}`}>Hoạt động</button>
+          <button type="button" onClick={() => setStatusFilter('INACTIVE')} className={`rounded-lg px-3 py-1 text-xs ${statusFilter === 'INACTIVE' ? 'bg-rose-600 text-white' : 'bg-slate-100'}`}>Ngừng hoạt động</button>
+        </div>
         <div className="space-y-2">
-          {materials.map((material) => (
+          {filteredMaterials.map((material) => (
             <div key={material.id} className="flex flex-col gap-2 rounded-xl border border-slate-100 bg-white p-3 md:flex-row md:items-center md:justify-between">
               <div>
                 <p className="font-semibold">{material.code} - {material.name}</p>
                 <p className="text-xs text-slate-500">Min: {material.minimumStock} {material.uom} | Max days: {material.maxStorageDays}</p>
+                <p className={`text-xs ${material.isActive ? 'text-emerald-600' : 'text-rose-600'}`}>
+                  Trạng thái: {material.isActive ? 'Hoạt động' : 'Ngừng hoạt động'}
+                </p>
               </div>
               <div className="flex gap-2">
-                <button type="button" onClick={() => handleEditMaterial(material)} className="rounded-lg border border-slate-200 px-3 py-1 text-xs">Sửa</button>
-                <button type="button" onClick={() => handleDeleteMaterial(material.id)} className="rounded-lg border border-rose-200 px-3 py-1 text-xs text-rose-600">Xoá</button>
+                <button type="button" onClick={() => handleEditMaterial(material)} disabled={!canManageMaterial} className="rounded-lg border border-slate-200 px-3 py-1 text-xs disabled:opacity-50">Sửa</button>
+                <button type="button" onClick={() => handleDeleteMaterial(material.id)} disabled={!canManageMaterial} className="rounded-lg border border-rose-200 px-3 py-1 text-xs text-rose-600 disabled:opacity-50">Xoá</button>
+                <button
+                  type="button"
+                  onClick={() => handleToggleMaterialStatus(material.id, material.isActive)}
+                  disabled={!canManageMaterial}
+                  className="rounded-lg border border-blue-200 px-3 py-1 text-xs text-blue-600 disabled:opacity-50"
+                >
+                  {material.isActive ? 'Ngừng hoạt động' : 'Kích hoạt'}
+                </button>
               </div>
             </div>
           ))}
+          {filteredMaterials.length === 0 && (
+            <p className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-500">
+              Không có nguyên liệu theo bộ lọc đã chọn.
+            </p>
+          )}
         </div>
       </section>
+
+      {showMaterialModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+          <section className="w-full max-w-2xl rounded-2xl bg-white p-4 shadow-xl" role="dialog" aria-modal="true" aria-label={editingMaterialId ? 'Cập nhật nguyên liệu' : 'Thêm nguyên liệu'}>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-base font-semibold">{editingMaterialId ? 'Cập nhật nguyên liệu' : 'Thêm nguyên liệu mới'}</h2>
+              <button type="button" onClick={handleCloseMaterialModal} className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-sm">Đóng</button>
+            </div>
+            <form onSubmit={handleSubmitMaterialForm} className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <input className="rounded-lg border border-slate-200 bg-white p-2 text-sm" placeholder="Mã NVL" value={materialForm.code} onChange={(event) => setMaterialForm((previous) => ({ ...previous, code: event.target.value }))} />
+              <input className="rounded-lg border border-slate-200 bg-white p-2 text-sm" placeholder="Tên NVL" value={materialForm.name} onChange={(event) => setMaterialForm((previous) => ({ ...previous, name: event.target.value }))} />
+              <select
+                className="rounded-lg border border-slate-200 bg-white p-2 text-sm"
+                value={materialForm.uom}
+                onChange={(event) => setMaterialForm((previous) => ({ ...previous, uom: event.target.value }))}
+              >
+                {MATERIAL_UOM_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+              <input className="rounded-lg border border-slate-200 bg-white p-2 text-sm" placeholder="Tồn tối thiểu" value={materialForm.minimumStock} onChange={(event) => setMaterialForm((previous) => ({ ...previous, minimumStock: event.target.value }))} />
+              <input className="rounded-lg border border-slate-200 bg-white p-2 text-sm md:col-span-2" placeholder="Số ngày lưu kho tối đa" value={materialForm.maxStorageDays} onChange={(event) => setMaterialForm((previous) => ({ ...previous, maxStorageDays: event.target.value }))} />
+              <div className="flex flex-wrap gap-2 md:col-span-2">
+                <button type="submit" disabled={!canManageMaterial} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                  {editingMaterialId ? 'Cập nhật NVL' : 'Thêm NVL'}
+                </button>
+                <button type="button" onClick={handleCloseMaterialModal} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm">
+                  Huỷ
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {showActionModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+          <section className="w-full max-w-5xl rounded-2xl bg-white p-4 shadow-xl" role="dialog" aria-modal="true" aria-label="Thao tác phiếu kho">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-base font-semibold">
+                {activeMode === 'RECEIPT' ? 'Phiếu nhập kho nguyên liệu' : activeMode === 'ISSUE' ? 'Phiếu xuất kho nguyên liệu' : 'Phiếu huỷ nguyên liệu'}
+              </h2>
+              <button type="button" onClick={handleCloseActionModal} className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-sm">Đóng</button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              {activeMode !== 'RECEIPT' && (
+                <>
+                  <label className="text-sm">
+                    <span>Mã nguyên liệu</span>
+                    <select
+                      className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2"
+                      value={selectedMaterialId}
+                      onChange={(event) => setSelectedMaterialId(event.target.value)}
+                    >
+                      {activeMaterials.map((material) => (
+                        <option key={material.id} value={material.id}>
+                          {material.code} - {material.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="text-sm">
+                    <span>Số lượng</span>
+                    <input className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2" value={quantity} onChange={(event) => setQuantity(event.target.value)} />
+                  </label>
+                </>
+              )}
+
+              {activeMode === 'RECEIPT' && (
+                <div className="md:col-span-2">
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <label className="text-sm">
+                      <span>Nhà cung cấp</span>
+                      <select className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2" value={supplierId} onChange={(event) => setSupplierId(event.target.value)}>
+                        {suppliers.map((supplier) => (
+                          <option key={supplier.id} value={supplier.id}>
+                            {supplier.code} - {supplier.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-sm">
+                      <span>Số phiếu nhập</span>
+                      <input className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2" value={receiptNo} onChange={(event) => setReceiptNo(event.target.value)} />
+                    </label>
+                    <label className="text-sm">
+                      <span>Ghi chú</span>
+                      <input className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2" value={receiptNote} onChange={(event) => setReceiptNote(event.target.value)} />
+                    </label>
+                  </div>
+
+                  <div className="mt-3 space-y-2">
+                    {receiptLines.map((line, index) => (
+                      <div key={`${index}-${line.batchNo}`} className="grid grid-cols-1 gap-2 rounded-lg border border-slate-200 bg-white p-2 md:grid-cols-5">
+                        <select className="rounded-lg border border-slate-200 bg-white p-2 text-sm" value={line.materialId} onChange={(event) => handleReceiptLineChange(index, 'materialId', event.target.value)}>
+                          {activeMaterials.map((material) => (
+                            <option key={material.id} value={material.id}>
+                              {material.code}
+                            </option>
+                          ))}
+                        </select>
+                        <input className="rounded-lg border border-slate-200 bg-white p-2 text-sm" placeholder="Mã lô" value={line.batchNo} onChange={(event) => handleReceiptLineChange(index, 'batchNo', event.target.value)} />
+                        <input className="rounded-lg border border-slate-200 bg-white p-2 text-sm" placeholder="Số lượng" value={line.quantity} onChange={(event) => handleReceiptLineChange(index, 'quantity', event.target.value)} />
+                        <input className="rounded-lg border border-slate-200 bg-white p-2 text-sm" placeholder="Đơn giá" value={line.unitPrice} onChange={(event) => handleReceiptLineChange(index, 'unitPrice', event.target.value)} />
+                        <button type="button" onClick={() => handleRemoveReceiptLine(index)} className="rounded-lg border border-rose-200 px-3 py-2 text-sm text-rose-600">Xoá dòng</button>
+                      </div>
+                    ))}
+                  </div>
+                  <button type="button" onClick={handleAddReceiptLine} className="mt-2 rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                    + Thêm dòng nguyên liệu
+                  </button>
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-2 md:col-span-2">
+                <button
+                  type="submit"
+                  disabled={!canSubmit || !hasValidSelection || submitting}
+                  className="rounded-lg bg-gradient-to-r from-blue-600 to-cyan-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {submitting ? 'Đang xử lý...' : 'Thực hiện'}
+                </button>
+                <button type="button" onClick={handleCloseActionModal} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm">
+                  Huỷ
+                </button>
+              </div>
+            </form>
+
+            {!canSubmit && (
+              <p className="mt-2 rounded-lg bg-amber-50 p-2 text-sm text-amber-700">
+                Tài khoản hiện tại chưa được phân quyền cho thao tác này.
+              </p>
+            )}
+          </section>
+        </div>
+      )}
+
+      {feedback && <p className="text-sm">{feedback}</p>}
     </main>
   )
 }

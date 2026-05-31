@@ -10,8 +10,11 @@ const UsersPage = () => {
   const [roles, setRoles] = useState<AdminRole[]>([])
   const [selectedUserId, setSelectedUserId] = useState('')
   const [selectedRoleId, setSelectedRoleId] = useState('')
+  const [passwordUserId, setPasswordUserId] = useState('')
+  const [newPassword, setNewPassword] = useState('')
   const [email, setEmail] = useState('')
   const [fullName, setFullName] = useState('')
+  const [createPassword, setCreatePassword] = useState('123456')
   const [feedback, setFeedback] = useState<string | null>(null)
 
   const canManageUsers = session?.permissions.includes('user.manage') ?? false
@@ -25,6 +28,9 @@ const UsersPage = () => {
     setRoles(rolesData)
     if (!selectedUserId && usersData.length > 0) {
       setSelectedUserId(usersData[0].id)
+    }
+    if (!passwordUserId && usersData.length > 0) {
+      setPasswordUserId(usersData[0].id)
     }
     if (!selectedRoleId && rolesData.length > 0) {
       setSelectedRoleId(rolesData[0].id)
@@ -48,9 +54,10 @@ const UsersPage = () => {
   const handleCreateUser = async (event: React.FormEvent) => {
     event.preventDefault()
     try {
-      await apiClient.createAdminUser({ email, fullName })
+      await apiClient.createAdminUser({ email, fullName, password: createPassword })
       setEmail('')
       setFullName('')
+      setCreatePassword('123456')
       await loadData()
       setFeedback('Đã tạo người dùng mới')
     } catch (error) {
@@ -77,10 +84,23 @@ const UsersPage = () => {
     }
   }
 
-  const handleSwitchUser = async (userId: string) => {
-    apiClient.setActiveUser(userId)
-    await reload()
-    window.location.href = '/dashboard'
+  const handleUpdateUserPassword = async () => {
+    if (!passwordUserId) {
+      return
+    }
+    if (newPassword.length < 6) {
+      setFeedback('Mật khẩu mới phải có ít nhất 6 ký tự')
+      return
+    }
+
+    try {
+      await apiClient.updateUserPassword(passwordUserId, newPassword)
+      setNewPassword('')
+      await reload()
+      setFeedback('Đã cập nhật mật khẩu người dùng')
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : 'Không thể cập nhật mật khẩu')
+    }
   }
 
   if (!canManageUsers) {
@@ -116,6 +136,12 @@ const UsersPage = () => {
             placeholder="Họ tên"
             value={fullName}
             onChange={(event) => setFullName(event.target.value)}
+          />
+          <input
+            className="rounded-lg border border-slate-200 bg-white p-2 text-sm"
+            placeholder="Mật khẩu ban đầu"
+            value={createPassword}
+            onChange={(event) => setCreatePassword(event.target.value)}
           />
           <button type="submit" className="rounded-lg bg-gradient-to-r from-blue-600 to-cyan-500 px-4 py-2 text-sm font-semibold text-white">
             Tạo user
@@ -153,18 +179,25 @@ const UsersPage = () => {
       </section>
 
       <section className="surface-card p-4">
-        <h2 className="mb-3 text-base font-semibold">Chuyển user đăng nhập để test quyền</h2>
-        <div className="flex flex-wrap gap-2">
-          {users.map((user) => (
-            <button
-              key={user.id}
-              type="button"
-              onClick={() => handleSwitchUser(user.id)}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50"
-            >
-              Đăng nhập bằng {user.fullName}
-            </button>
-          ))}
+        <h2 className="mb-3 text-base font-semibold">Cập nhật mật khẩu người dùng</h2>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <select className="rounded-lg border border-slate-200 bg-white p-2 text-sm" value={passwordUserId} onChange={(event) => setPasswordUserId(event.target.value)}>
+            {users.map((user) => (
+              <option key={user.id} value={user.id}>
+                {user.fullName} - {user.email}
+              </option>
+            ))}
+          </select>
+          <input
+            className="rounded-lg border border-slate-200 bg-white p-2 text-sm"
+            type="password"
+            placeholder="Mật khẩu mới"
+            value={newPassword}
+            onChange={(event) => setNewPassword(event.target.value)}
+          />
+          <button type="button" onClick={handleUpdateUserPassword} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white">
+            Cập nhật mật khẩu
+          </button>
         </div>
       </section>
 

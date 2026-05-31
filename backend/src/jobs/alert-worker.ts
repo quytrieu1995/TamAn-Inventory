@@ -119,6 +119,13 @@ export const createAlertWorker = (
       status: 'ok',
       executedAt: new Date().toISOString(),
       alertsCount: alerts.length,
+      alerts: alerts.map((alert) => ({
+        id: alert.id,
+        materialId: alert.materialId,
+        type: alert.type,
+        message: alert.message,
+        triggeredAt: alert.triggeredAt
+      })),
       config: resolvedConfig
     }
   }

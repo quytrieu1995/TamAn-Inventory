@@ -35,6 +35,7 @@ export type InventoryRepository = {
 
 export type RecipeRepository = {
   getRecipeById: (recipeId: Id) => Promise<Recipe | null>
+  getLatestRecipeByFinishedGood: (finishedGoodId: Id) => Promise<Recipe | null>
   getLatestVersionByFinishedGood: (finishedGoodId: Id) => Promise<number>
   saveRecipe: (recipe: Recipe) => Promise<void>
 }

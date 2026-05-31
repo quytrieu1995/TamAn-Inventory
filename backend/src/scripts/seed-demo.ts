@@ -1,4 +1,5 @@
 import { dbPool } from '../db/pool'
+import { hashPassword } from '../core/password'
 
 const DEMO = {
   plantId: '11111111-1111-4111-8111-111111111111',
@@ -168,11 +169,11 @@ const run = async () => {
 
     await client.query(
       'INSERT INTO users (id, email, full_name, password_hash, is_active) VALUES ($1, $2, $3, $4, true)',
-      [DEMO.users.admin, 'admin@taman.local', 'Quan tri demo', 'demo-admin-hash']
+      [DEMO.users.admin, 'admin@taman.local', 'Quan tri demo', hashPassword('123456')]
     )
     await client.query(
       'INSERT INTO users (id, email, full_name, password_hash, is_active) VALUES ($1, $2, $3, $4, true)',
-      [DEMO.users.operator, 'operator@taman.local', 'Van hanh demo', 'demo-operator-hash']
+      [DEMO.users.operator, 'operator@taman.local', 'Van hanh demo', hashPassword('123456')]
     )
 
     await client.query(
