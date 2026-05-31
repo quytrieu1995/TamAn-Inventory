@@ -1127,11 +1127,6 @@
       grid-column: span 2 / span 2;
     }
   }
-  .md\:col-span-3 {
-    @media (width >= 48rem) {
-      grid-column: span 3 / span 3;
-    }
-  }
   .md\:block {
     @media (width >= 48rem) {
       display: block;
