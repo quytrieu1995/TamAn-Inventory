@@ -2,6 +2,7 @@ import type { Pool, PoolClient } from 'pg'
 import type {
   Material,
   MaterialBatch,
+  MaterialStockRow,
   ProductionOrder,
   StockMovement
 } from '../core/types'
@@ -56,8 +57,20 @@ const mapProductionOrder = (row: Record<string, unknown>): ProductionOrder => ({
   recipeId: String(row.recipe_id),
   plannedQty: Number(row.planned_qty),
   actualQty: Number(row.actual_qty),
+  varianceReason: row.variance_reason ? String(row.variance_reason) : null,
   status: String(row.status) as ProductionOrder['status'],
   createdAt: new Date(String(row.created_at)).toISOString()
+})
+
+const mapMaterialStock = (row: Record<string, unknown>): MaterialStockRow => ({
+  materialId: String(row.material_id),
+  code: String(row.material_code),
+  name: String(row.material_name),
+  batchId: String(row.batch_id),
+  batchNo: String(row.batch_no),
+  quantityOnHand: Number(row.quantity_on_hand),
+  minimumStock: Number(row.minimum_stock),
+  storageDays: Number(row.storage_days)
 })
 
 const createInventoryRepository = (db: DbExecutor): FoodInventoryRepositories['inventory'] => ({
@@ -186,6 +199,31 @@ const createInventoryRepository = (db: DbExecutor): FoodInventoryRepositories['i
     )
 
     return result.rows.map(mapMovement)
+  },
+
+  listMaterialStocks: async (plantId, warehouseId) => {
+    const result = await db.query(
+      `
+        SELECT
+          m.id AS material_id,
+          m.code AS material_code,
+          m.name AS material_name,
+          b.id AS batch_id,
+          b.batch_no,
+          b.qty_available AS quantity_on_hand,
+          m.minimum_stock,
+          GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - b.received_at)) / 86400))::int AS storage_days
+        FROM material_batches b
+        INNER JOIN materials m ON m.id = b.material_id
+        WHERE b.plant_id = $1
+          AND b.warehouse_id = $2
+          AND b.qty_available > 0
+        ORDER BY m.code ASC, b.received_at ASC
+      `,
+      [plantId, warehouseId]
+    )
+
+    return result.rows.map(mapMaterialStock)
   }
 })
 
@@ -194,6 +232,7 @@ const createRecipeRepository = (db: DbExecutor): FoodInventoryRepositories['reci
     const recipeResult = await db.query(
       `
         SELECT r.id, r.plant_id, r.finished_good_id, r.version_no, r.updated_at,
+               r.loss_rate_percent,
                COALESCE(fg.name, fg.code) AS recipe_name
         FROM recipes r
         LEFT JOIN finished_goods fg ON fg.id = r.finished_good_id
@@ -209,7 +248,7 @@ const createRecipeRepository = (db: DbExecutor): FoodInventoryRepositories['reci
     const recipeRow = recipeResult.rows[0]
     const itemsResult = await db.query(
       `
-        SELECT material_id, qty_per_unit
+        SELECT material_id, qty_per_unit, scrap_ratio
         FROM recipe_items
         WHERE recipe_id = $1
       `,
@@ -222,27 +261,62 @@ const createRecipeRepository = (db: DbExecutor): FoodInventoryRepositories['reci
       finishedGoodId: String(recipeRow.finished_good_id),
       name: String(recipeRow.recipe_name ?? 'Recipe'),
       versionNo: Number(recipeRow.version_no),
+      lossRatePercent: Number(recipeRow.loss_rate_percent ?? 0),
       items: itemsResult.rows.map((item) => ({
         materialId: String(item.material_id),
-        qtyPerUnit: Number(item.qty_per_unit)
+        qtyPerUnit: Number(item.qty_per_unit),
+        scrapRatio: Number(item.scrap_ratio ?? 0)
       })),
       updatedAt: new Date(String(recipeRow.updated_at)).toISOString()
     }
+  },
+
+  getLatestRecipeByFinishedGood: async (finishedGoodId) => {
+    const recipeResult = await db.query(
+      `
+        SELECT id
+        FROM recipes
+        WHERE finished_good_id = $1
+        ORDER BY version_no DESC, updated_at DESC
+        LIMIT 1
+      `,
+      [finishedGoodId]
+    )
+
+    if (recipeResult.rowCount === 0) {
+      return null
+    }
+
+    return createRecipeRepository(db).getRecipeById(String(recipeResult.rows[0].id))
+  },
+
+  getLatestVersionByFinishedGood: async (finishedGoodId) => {
+    const result = await db.query(
+      `
+        SELECT COALESCE(MAX(version_no), 0) AS max_version
+        FROM recipes
+        WHERE finished_good_id = $1
+      `,
+      [finishedGoodId]
+    )
+
+    return Number(result.rows[0]?.max_version ?? 0)
   },
 
   saveRecipe: async (recipe) => {
     await db.query(
       `
         INSERT INTO recipes (
-          id, plant_id, finished_good_id, version_no, status, effective_from, created_at, updated_at
+          id, plant_id, finished_good_id, version_no, status, effective_from, loss_rate_percent, created_at, updated_at
         )
-        VALUES ($1, $2, $3, $4, 'ACTIVE', CURRENT_DATE, now(), now())
+        VALUES ($1, $2, $3, $4, 'ACTIVE', CURRENT_DATE, $5, now(), now())
         ON CONFLICT (id)
         DO UPDATE SET
           version_no = EXCLUDED.version_no,
+          loss_rate_percent = EXCLUDED.loss_rate_percent,
           updated_at = now()
       `,
-      [recipe.id, recipe.plantId, recipe.finishedGoodId, recipe.versionNo]
+      [recipe.id, recipe.plantId, recipe.finishedGoodId, recipe.versionNo, recipe.lossRatePercent]
     )
 
     await db.query('DELETE FROM recipe_items WHERE recipe_id = $1', [recipe.id])
@@ -250,10 +324,10 @@ const createRecipeRepository = (db: DbExecutor): FoodInventoryRepositories['reci
     for (const item of recipe.items) {
       await db.query(
         `
-          INSERT INTO recipe_items (id, recipe_id, material_id, qty_per_unit)
-          VALUES (gen_random_uuid(), $1, $2, $3)
+          INSERT INTO recipe_items (id, recipe_id, material_id, qty_per_unit, scrap_ratio)
+          VALUES (gen_random_uuid(), $1, $2, $3, $4)
         `,
-        [recipe.id, item.materialId, item.qtyPerUnit]
+        [recipe.id, item.materialId, item.qtyPerUnit, item.scrapRatio]
       )
     }
   }
@@ -265,12 +339,13 @@ const createProductionRepository = (db: DbExecutor): FoodInventoryRepositories['
       `
         INSERT INTO production_orders (
           id, plant_id, warehouse_id, order_no, finished_good_id, recipe_id,
-          planned_qty, actual_qty, status, created_at, updated_at
+          planned_qty, actual_qty, variance_reason, status, created_at, updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), now())
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now(), now())
         ON CONFLICT (id)
         DO UPDATE SET
           actual_qty = EXCLUDED.actual_qty,
+          variance_reason = EXCLUDED.variance_reason,
           status = EXCLUDED.status,
           updated_at = now()
       `,
@@ -283,6 +358,7 @@ const createProductionRepository = (db: DbExecutor): FoodInventoryRepositories['
         order.recipeId,
         order.plannedQty,
         order.actualQty,
+        order.varianceReason ?? null,
         order.status
       ]
     )
@@ -292,7 +368,7 @@ const createProductionRepository = (db: DbExecutor): FoodInventoryRepositories['
     const result = await db.query(
       `
         SELECT id, plant_id, warehouse_id, order_no, finished_good_id, recipe_id,
-               planned_qty, actual_qty, status, created_at
+               planned_qty, actual_qty, variance_reason, status, created_at
         FROM production_orders
         WHERE id = $1
       `,

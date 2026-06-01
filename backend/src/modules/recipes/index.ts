@@ -12,9 +12,11 @@ type CreateRecipeInput = {
   plantId: string
   finishedGoodId: string
   name: string
+  lossRatePercent: number
   items: Array<{
     materialId: string
     qtyPerUnit: number
+    scrapRatio: number
   }>
 }
 
@@ -36,7 +38,8 @@ const maskRecipeForLimitedView = (recipe: Recipe): Recipe => {
     ...recipe,
     items: recipe.items.map((item) => ({
       ...item,
-      qtyPerUnit: Number(item.qtyPerUnit.toFixed(3))
+      qtyPerUnit: Number(item.qtyPerUnit.toFixed(3)),
+      scrapRatio: Number(item.scrapRatio.toFixed(4))
     }))
   }
 }
@@ -60,12 +63,14 @@ export const createRecipeService = ({ recipeRepository }: RecipeServiceDependenc
   const createRecipe = async (auth: AuthContext, input: CreateRecipeInput) => {
     requirePermission(auth, 'recipe.manage')
     const now = new Date().toISOString()
+    const latestVersion = await recipeRepository.getLatestVersionByFinishedGood(input.finishedGoodId)
     const recipe: Recipe = {
       id: input.id,
       plantId: input.plantId,
       finishedGoodId: input.finishedGoodId,
       name: input.name,
-      versionNo: 1,
+      versionNo: latestVersion + 1,
+      lossRatePercent: input.lossRatePercent,
       items: input.items,
       updatedAt: now
     }
@@ -74,7 +79,11 @@ export const createRecipeService = ({ recipeRepository }: RecipeServiceDependenc
     return recipe
   }
 
-  const updateRecipe = async (auth: AuthContext, recipeId: string, input: Pick<CreateRecipeInput, 'name' | 'items'>) => {
+  const updateRecipe = async (
+    auth: AuthContext,
+    recipeId: string,
+    input: Pick<CreateRecipeInput, 'name' | 'items'> & { lossRatePercent?: number }
+  ) => {
     requirePermission(auth, 'recipe.manage')
     const existing = await recipeRepository.getRecipeById(recipeId)
     if (!existing) {
@@ -84,6 +93,7 @@ export const createRecipeService = ({ recipeRepository }: RecipeServiceDependenc
     const recipe: Recipe = {
       ...existing,
       name: input.name,
+      lossRatePercent: input.lossRatePercent ?? existing.lossRatePercent,
       items: input.items,
       versionNo: existing.versionNo + 1,
       updatedAt: new Date().toISOString()

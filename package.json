@@ -5,10 +5,13 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch backend/src/server.ts",
+    "frontend/dev:fast": "npm run dev:fast --prefix ./frontend",
+    "frontend/dev:stable": "npm run dev:stable --prefix ./frontend",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
-    "db:migrate": "tsx backend/src/scripts/migrate.ts",
-    "idempotency:cleanup": "tsx backend/src/scripts/idempotency-cleanup.ts",
+    "db:migrate": "node --import tsx backend/src/scripts/migrate.ts",
+    "db:seed-demo": "node --import tsx backend/src/scripts/seed-demo.ts",
+    "idempotency:cleanup": "node --import tsx backend/src/scripts/idempotency-cleanup.ts",
     "test": "node --import tsx --test backend/src/tests/**/*.test.ts"
   },
   "repository": {
@@ -43,5 +46,8 @@
     "supertest": "^7.2.2",
     "tsx": "^4.22.3",
     "typescript": "^6.0.3"
+  },
+  "directories": {
+    "doc": "docs"
   }
 }

@@ -1,14 +1,41 @@
 export type Id = string
 
 export type PermissionCode =
+  | 'material.view'
+  | 'material.create'
+  | 'material.update'
+  | 'material.delete'
+  | 'material.cancel'
   | 'recipe.view'
+  | 'recipe.create'
+  | 'recipe.update'
+  | 'recipe.delete'
+  | 'recipe.cancel'
   | 'recipe.manage'
+  | 'supplier.view'
+  | 'supplier.create'
+  | 'supplier.update'
+  | 'supplier.delete'
+  | 'supplier.cancel'
   | 'inventory.receive'
   | 'inventory.issue'
   | 'inventory.adjust'
+  | 'inventory.cancel'
+  | 'production.view'
   | 'production.create'
+  | 'production.approve'
+  | 'production.update'
+  | 'production.delete'
+  | 'production.cancel'
   | 'report.view'
+  | 'report.create'
+  | 'report.update'
+  | 'report.delete'
+  | 'report.cancel'
   | 'report.manage'
+  | 'supplier.manage'
+  | 'material.manage'
+  | 'user.manage'
 
 export type AuthContext = {
   userId: Id
@@ -42,6 +69,7 @@ export type MaterialBatch = {
 export type RecipeItem = {
   materialId: Id
   qtyPerUnit: number
+  scrapRatio: number
 }
 
 export type Recipe = {
@@ -50,6 +78,7 @@ export type Recipe = {
   finishedGoodId: Id
   name: string
   versionNo: number
+  lossRatePercent: number
   items: RecipeItem[]
   updatedAt: string
 }
@@ -97,6 +126,7 @@ export type ProductionOrder = {
   recipeId: Id
   plannedQty: number
   actualQty: number
+  varianceReason?: string | null
   status: ProductionOrderStatus
   createdAt: string
 }
@@ -123,4 +153,15 @@ export type MonthlySnapshot = {
   totalDisposalAmount: number
   endingInventoryAmount: number
   endingInventoryQuantity: number
+}
+
+export type MaterialStockRow = {
+  materialId: Id
+  code: string
+  name: string
+  batchId: Id
+  batchNo: string
+  quantityOnHand: number
+  minimumStock: number
+  storageDays: number
 }

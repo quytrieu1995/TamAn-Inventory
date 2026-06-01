@@ -21,6 +21,7 @@ MVP foundation for multi-plant, multi-warehouse food material and finished-goods
 - `docs/solution-architecture.md`
 - `docs/api-spec.md`
 - `docs/uat-go-live-checklist.md`
+- `docs/demo-api-curls.md`
 - `backend/db/migrations/0001_init.sql`
 - `backend/src/http/routes.ts`
 - `backend/src/db/postgres-repositories.ts`
@@ -42,6 +43,14 @@ MVP foundation for multi-plant, multi-warehouse food material and finished-goods
    - `npm test`
 6. Run idempotency cleanup manually
    - `npm run idempotency:cleanup`
+
+Frontend dev modes (run from repo root):
+- `npm run frontend/dev:fast` (native watch, faster)
+- `npm run frontend/dev:stable` (polling watch, more stable when EMFILE appears)
+
+Frontend API integration:
+- default backend base URL is `http://127.0.0.1:4000/api/v1`
+- override with `NEXT_PUBLIC_API_BASE_URL` in frontend environment when needed
 
 Required request headers for protected APIs:
 - `x-plant-id`

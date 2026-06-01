@@ -10,6 +10,7 @@ import { createTestPool } from '../helpers/test-db'
 const IDS = {
   plantId: '11111111-1111-4111-8111-111111111111',
   warehouseId: '22222222-2222-4222-8222-222222222222',
+  supplierId: '9a9a9a9a-9a9a-4a9a-8a9a-9a9a9a9a9a9a',
   materialSugar: '33333333-3333-4333-8333-333333333333',
   materialFlour: '44444444-4444-4444-8444-444444444444',
   finishedGood: '55555555-5555-4555-8555-555555555555',
@@ -40,6 +41,9 @@ const seedBaseData = async (pool: Pool) => {
       INSERT INTO warehouses (id, plant_id, code, name)
       VALUES ($2, $1, 'W1', 'Warehouse 1');
 
+      INSERT INTO suppliers (id, plant_id, code, name)
+      VALUES ($7, $1, 'SUP1', 'Supplier 1');
+
       INSERT INTO materials (id, plant_id, code, name, uom, minimum_stock, max_storage_days)
       VALUES
         ($3, $1, 'SUGAR001', 'Sugar', 'kg', 20, 30),
@@ -62,7 +66,8 @@ const seedBaseData = async (pool: Pool) => {
       IDS.materialSugar,
       IDS.materialFlour,
       IDS.finishedGood,
-      IDS.recipeId
+      IDS.recipeId,
+      IDS.supplierId
     ]
   )
 }
@@ -71,6 +76,8 @@ test('POST /inventory/receipts should be idempotent by key', async () => {
   const { app, pool } = await setupApp()
   const payload = {
     receiptId: '88888888-8888-4888-8888-888888888888',
+    receiptNo: 'PNK-TEST-001',
+    supplierId: IDS.supplierId,
     warehouseId: IDS.warehouseId,
     receivedAt: '2026-05-01T00:00:00.000Z',
     items: [
@@ -121,6 +128,8 @@ test('POST /inventory/issues should rollback when stock is insufficient', async 
     .set('Idempotency-Key', 'idem-receipt-2')
     .send({
       receiptId: '99999999-9999-4999-8999-999999999999',
+      receiptNo: 'PNK-TEST-002',
+      supplierId: IDS.supplierId,
       warehouseId: IDS.warehouseId,
       receivedAt: '2026-05-01T00:00:00.000Z',
       items: [
@@ -181,6 +190,33 @@ test('POST /inventory/issues should rollback when stock is insufficient', async 
 test('POST /production-orders/:id/complete should be idempotent', async () => {
   const { app, pool } = await setupApp()
 
+  const receiptResponse = await request(app as Express)
+    .post('/api/v1/inventory/receipts')
+    .set(headers)
+    .set('Idempotency-Key', 'idem-receipt-3')
+    .send({
+      receiptId: '12121212-3434-4434-8434-121212121212',
+      receiptNo: 'PNK-TEST-003',
+      supplierId: IDS.supplierId,
+      warehouseId: IDS.warehouseId,
+      receivedAt: '2026-05-01T00:00:00.000Z',
+      items: [
+        {
+          materialId: IDS.materialSugar,
+          batchNo: 'SUGAR-PROD',
+          quantity: 100,
+          unitPrice: 10
+        },
+        {
+          materialId: IDS.materialFlour,
+          batchNo: 'FLOUR-PROD',
+          quantity: 100,
+          unitPrice: 9
+        }
+      ]
+    })
+  assert.equal(receiptResponse.status, 201)
+
   const createOrderResponse = await request(app as Express)
     .post('/api/v1/production-orders')
     .set(headers)
@@ -188,12 +224,17 @@ test('POST /production-orders/:id/complete should be idempotent', async () => {
       warehouseId: IDS.warehouseId,
       orderNo: 'PO-001',
       finishedGoodId: IDS.finishedGood,
-      recipeId: IDS.recipeId,
       plannedQty: 50
     })
 
   assert.equal(createOrderResponse.status, 201)
   const orderId = createOrderResponse.body.data.id as string
+
+  const approveResponse = await request(app as Express)
+    .post(`/api/v1/production-orders/${orderId}/approve`)
+    .set(headers)
+
+  assert.equal(approveResponse.status, 200)
 
   const completePayload = {
     actualQty: 48,
@@ -239,6 +280,8 @@ test('POST /inventory/receipts should reject reused key with different payload',
     .set('Idempotency-Key', 'idem-receipt-conflict-1')
     .send({
       receiptId: 'abababab-abab-4bab-8bab-abababababab',
+      receiptNo: 'PNK-TEST-004',
+      supplierId: IDS.supplierId,
       warehouseId: IDS.warehouseId,
       receivedAt: '2026-05-05T00:00:00.000Z',
       items: [
@@ -257,6 +300,8 @@ test('POST /inventory/receipts should reject reused key with different payload',
     .set('Idempotency-Key', 'idem-receipt-conflict-1')
     .send({
       receiptId: 'bcbcbcbc-bcbc-4cbc-8cbc-bcbcbcbcbcbc',
+      receiptNo: 'PNK-TEST-005',
+      supplierId: IDS.supplierId,
       warehouseId: IDS.warehouseId,
       receivedAt: '2026-05-05T00:00:00.000Z',
       items: [

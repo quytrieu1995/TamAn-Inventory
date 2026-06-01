@@ -1,0 +1,12 @@
+{
+  "/_not-found/page": "/_not-found",
+  "/reports/page": "/reports",
+  "/finished-goods/page": "/finished-goods",
+  "/recipes/page": "/recipes",
+  "/login/page": "/login",
+  "/suppliers/page": "/suppliers",
+  "/dashboard/page": "/dashboard",
+  "/materials/page": "/materials",
+  "/page": "/",
+  "/users/page": "/users"
+}

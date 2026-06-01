@@ -45,6 +45,34 @@ const testSchemaSql = `
     max_storage_days INTEGER NOT NULL DEFAULT 0
   );
 
+  CREATE TABLE suppliers (
+    id UUID PRIMARY KEY,
+    plant_id UUID NOT NULL REFERENCES plants(id),
+    code TEXT NOT NULL,
+    name TEXT NOT NULL
+  );
+
+  CREATE TABLE purchase_receipts (
+    id UUID PRIMARY KEY,
+    plant_id UUID NOT NULL REFERENCES plants(id),
+    warehouse_id UUID NOT NULL REFERENCES warehouses(id),
+    supplier_id UUID NOT NULL REFERENCES suppliers(id),
+    receipt_no TEXT NOT NULL,
+    received_at TIMESTAMPTZ NOT NULL,
+    note TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+
+  CREATE TABLE purchase_receipt_items (
+    id UUID PRIMARY KEY,
+    receipt_id UUID NOT NULL REFERENCES purchase_receipts(id) ON DELETE CASCADE,
+    material_id UUID NOT NULL REFERENCES materials(id),
+    batch_no TEXT NOT NULL,
+    quantity NUMERIC(16, 3) NOT NULL,
+    unit_price NUMERIC(16, 2) NOT NULL
+  );
+
   CREATE TABLE finished_goods (
     id UUID PRIMARY KEY,
     plant_id UUID NOT NULL REFERENCES plants(id),
