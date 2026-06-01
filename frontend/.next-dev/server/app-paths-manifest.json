@@ -1,8 +1,9 @@
 {
   "/finished-goods/page": "app/finished-goods/page.js",
-  "/recipes/page": "app/recipes/page.js",
   "/dashboard/page": "app/dashboard/page.js",
   "/materials/page": "app/materials/page.js",
   "/reports/page": "app/reports/page.js",
-  "/suppliers/page": "app/suppliers/page.js"
+  "/suppliers/page": "app/suppliers/page.js",
+  "/recipes/page": "app/recipes/page.js",
+  "/login/page": "app/login/page.js"
 }

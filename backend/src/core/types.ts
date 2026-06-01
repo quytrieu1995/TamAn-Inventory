@@ -126,6 +126,7 @@ export type ProductionOrder = {
   recipeId: Id
   plannedQty: number
   actualQty: number
+  varianceReason?: string | null
   status: ProductionOrderStatus
   createdAt: string
 }

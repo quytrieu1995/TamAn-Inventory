@@ -97,6 +97,36 @@ export const createFinishedGoodsService = ({
     return approvedOrder
   }
 
+  const cancelProductionOrder = async (
+    auth: AuthContext,
+    input: {
+      orderId: string
+    }
+  ) => {
+    requirePermission(auth, 'production.cancel')
+    const order = await productionRepository.getProductionOrderById(input.orderId)
+    if (!order) {
+      throw new NotFoundError('Production order')
+    }
+    requireWarehouseAccess(auth, order.warehouseId)
+
+    if (order.status === 'CANCELLED') {
+      return order
+    }
+
+    if (order.status !== 'DRAFT') {
+      throw new ConflictError('Chỉ được huỷ lệnh ở trạng thái chờ duyệt')
+    }
+
+    const cancelledOrder: ProductionOrder = {
+      ...order,
+      status: 'CANCELLED'
+    }
+
+    await productionRepository.saveProductionOrder(cancelledOrder)
+    return cancelledOrder
+  }
+
   const completeProductionOrder = async (
     auth: AuthContext,
     input: {
@@ -104,6 +134,7 @@ export const createFinishedGoodsService = ({
       actualQty: number
       movedAt: string
       outputUnitCost: number
+      varianceReason?: string
     }
   ) => {
     requirePermission(auth, 'production.create')
@@ -119,6 +150,11 @@ export const createFinishedGoodsService = ({
 
     if (order.status !== 'RELEASED' && order.status !== 'IN_PROGRESS') {
       throw new ConflictError('Production order must be approved before completion')
+    }
+
+    const hasVariance = Number(order.plannedQty.toFixed(3)) !== Number(input.actualQty.toFixed(3))
+    if (hasVariance && !input.varianceReason?.trim()) {
+      throw new ConflictError('Sản lượng thực tế khác kế hoạch, vui lòng nhập lý do')
     }
 
     const recipe = await recipeRepository.getRecipeById(order.recipeId)
@@ -148,6 +184,7 @@ export const createFinishedGoodsService = ({
     const completedOrder: ProductionOrder = {
       ...order,
       actualQty: input.actualQty,
+      varianceReason: hasVariance ? input.varianceReason?.trim() ?? null : null,
       status: 'COMPLETED'
     }
     await productionRepository.saveProductionOrder(completedOrder)
@@ -177,6 +214,7 @@ export const createFinishedGoodsService = ({
   return {
     createProductionOrder,
     approveProductionOrder,
+    cancelProductionOrder,
     completeProductionOrder
   }
 }

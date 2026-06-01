@@ -115,6 +115,17 @@ export type DashboardMetrics = {
   totalIssue: number
   totalDisposal: number
   movementCount: number
+  productionVarianceAlerts: Array<{
+    orderId: string
+    orderNo: string
+    finishedGoodCode: string
+    finishedGoodName: string
+    plannedQty: number
+    actualQty: number
+    varianceQty: number
+    reason: string
+    completedAt: string
+  }>
 }
 
 export type MaterialStockRow = {
@@ -325,6 +336,7 @@ export type ProductionOrderRow = {
   recipeId: string
   plannedQty: number
   actualQty: number
+  varianceReason: string | null
   status: string
   statusLabel: string
   warehouseId: string
@@ -592,11 +604,17 @@ export const apiClient = {
       method: 'POST'
     })
   },
+  cancelProductionOrder: (orderId: string) => {
+    return requestJson(`/production-orders/${orderId}/cancel`, {
+      method: 'POST'
+    })
+  },
   completeProductionOrder: (input: {
     orderId: string
     actualQty: number
     movedAt: string
     outputUnitCost: number
+    varianceReason?: string
   }) => {
     return requestJson(`/production-orders/${input.orderId}/complete`, {
       method: 'POST',
@@ -606,7 +624,8 @@ export const apiClient = {
       body: JSON.stringify({
         actualQty: input.actualQty,
         movedAt: input.movedAt,
-        outputUnitCost: input.outputUnitCost
+        outputUnitCost: input.outputUnitCost,
+        varianceReason: input.varianceReason
       })
     })
   },

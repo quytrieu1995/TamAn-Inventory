@@ -1,4 +1,5 @@
 import { randomBytes, scryptSync, timingSafeEqual } from 'crypto'
+import { env } from '../config/env'
 
 const SCRYPT_KEY_LENGTH = 64
 const SCRYPT_N = 16384
@@ -20,11 +21,14 @@ export const hashPassword = (password: string) => {
 }
 
 export const verifyPassword = (password: string, encodedHash: string) => {
-  if (encodedHash.startsWith('demo-')) {
+  if (encodedHash.startsWith('demo-') && env.allowDemoPasswordFallback) {
     return password === '123456'
   }
 
   if (!encodedHash.startsWith('scrypt$')) {
+    if (!env.allowLegacyPlaintextPasswordFallback) {
+      return false
+    }
     return encodedHash === password
   }
 

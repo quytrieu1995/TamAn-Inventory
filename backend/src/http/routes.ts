@@ -96,6 +96,15 @@ const ensureRecipeItemScrapRatioColumn = async (pool: RouterDependencies['pool']
   )
 }
 
+const ensureProductionOrderVarianceReasonColumn = async (pool: RouterDependencies['pool']) => {
+  await pool.query(
+    `
+      ALTER TABLE production_orders
+      ADD COLUMN IF NOT EXISTS variance_reason TEXT
+    `
+  )
+}
+
 const PERMISSION_CATALOG: Array<{ code: string, description: string }> = [
   { code: 'material.view', description: 'Xem nguyên liệu' },
   { code: 'material.create', description: 'Thêm nguyên liệu' },
@@ -164,6 +173,10 @@ const ensurePermissionCatalog = async (pool: RouterDependencies['pool']) => {
 const getProductionOrderStatusLabel = (status: string) => {
   if (status === 'COMPLETED') {
     return 'Hoàn thành'
+  }
+
+  if (status === 'CANCELLED') {
+    return 'Đã huỷ'
   }
 
   if (status === 'RELEASED' || status === 'IN_PROGRESS') {
@@ -289,6 +302,7 @@ const toProductionOrderResponse = (order: {
   recipeId: string
   plannedQty: number
   actualQty: number
+  varianceReason?: string | null
   status: string
   warehouseId: string
   createdAt: string
@@ -1860,6 +1874,7 @@ export const createRouter = (dependencies: RouterDependencies) => {
 
   router.get('/production-orders', asyncHandler(async (request, response) => {
     const auth = await getAuthContext(request)
+    await ensureProductionOrderVarianceReasonColumn(pool)
     const schema = z.object({
       warehouseId: idSchema.optional()
     })
@@ -1867,7 +1882,7 @@ export const createRouter = (dependencies: RouterDependencies) => {
 
     const result = await pool.query(
       `
-        SELECT id, order_no, finished_good_id, recipe_id, planned_qty, actual_qty, status, created_at, warehouse_id
+        SELECT id, order_no, finished_good_id, recipe_id, planned_qty, actual_qty, variance_reason, status, created_at, warehouse_id
         FROM production_orders
         WHERE plant_id = $1
           AND ($2::uuid IS NULL OR warehouse_id = $2)
@@ -1884,6 +1899,7 @@ export const createRouter = (dependencies: RouterDependencies) => {
         recipeId: String(row.recipe_id),
         plannedQty: Number(row.planned_qty),
         actualQty: Number(row.actual_qty),
+        varianceReason: row.variance_reason ? String(row.variance_reason) : null,
         status: String(row.status),
         warehouseId: String(row.warehouse_id),
         createdAt: new Date(String(row.created_at)).toISOString()
@@ -1894,6 +1910,7 @@ export const createRouter = (dependencies: RouterDependencies) => {
   router.post('/production-orders', asyncHandler(async (request, response) => {
     const auth = await getAuthContext(request)
     await ensureRecipeLossRateColumn(pool)
+    await ensureProductionOrderVarianceReasonColumn(pool)
     const schema = z.object({
       warehouseId: idSchema,
       orderNo: z.string().min(1),
@@ -1911,8 +1928,21 @@ export const createRouter = (dependencies: RouterDependencies) => {
 
   router.post('/production-orders/:id/approve', asyncHandler(async (request, response) => {
     const auth = await getAuthContext(request)
+    await ensureProductionOrderVarianceReasonColumn(pool)
     const result = await runInTransaction(dependencies, async (transactionalServices) => {
       return transactionalServices.finishedGoodsService.approveProductionOrder(auth, {
+        orderId: String(request.params.id)
+      })
+    })
+
+    return response.json(toSuccessResponse(toProductionOrderResponse(result)))
+  }))
+
+  router.post('/production-orders/:id/cancel', asyncHandler(async (request, response) => {
+    const auth = await getAuthContext(request)
+    await ensureProductionOrderVarianceReasonColumn(pool)
+    const result = await runInTransaction(dependencies, async (transactionalServices) => {
+      return transactionalServices.finishedGoodsService.cancelProductionOrder(auth, {
         orderId: String(request.params.id)
       })
     })
@@ -1923,10 +1953,12 @@ export const createRouter = (dependencies: RouterDependencies) => {
   router.post('/production-orders/:id/complete', asyncHandler(async (request, response) => {
     const auth = await getAuthContext(request)
     await ensureRecipeLossRateColumn(pool)
+    await ensureProductionOrderVarianceReasonColumn(pool)
     const schema = z.object({
       actualQty: z.number().positive(),
       movedAt: z.string().datetime(),
-      outputUnitCost: z.number().nonnegative()
+      outputUnitCost: z.number().nonnegative(),
+      varianceReason: z.string().trim().min(1).optional()
     })
 
     const payload = schema.parse(request.body)
@@ -1936,7 +1968,8 @@ export const createRouter = (dependencies: RouterDependencies) => {
         orderId: String(request.params.id),
         actualQty: payload.actualQty,
         movedAt: payload.movedAt,
-        outputUnitCost: payload.outputUnitCost
+        outputUnitCost: payload.outputUnitCost,
+        varianceReason: payload.varianceReason
       })
 
       return {
@@ -1958,12 +1991,50 @@ export const createRouter = (dependencies: RouterDependencies) => {
 
   router.get('/reports/dashboard', asyncHandler(async (request, response) => {
     const auth = await getAuthContext(request)
+    await ensureProductionOrderVarianceReasonColumn(pool)
     const schema = z.object({
       warehouseId: idSchema
     })
+    const query = schema.parse(request.query)
 
-    const report = await services.reportService.getDashboard(auth, schema.parse(request.query).warehouseId)
-    return response.json(toSuccessResponse(report))
+    const report = await services.reportService.getDashboard(auth, query.warehouseId)
+    const varianceRowsResult = await pool.query(
+      `
+        SELECT
+          po.id,
+          po.order_no,
+          po.planned_qty,
+          po.actual_qty,
+          po.variance_reason,
+          po.updated_at,
+          fg.code AS finished_good_code,
+          fg.name AS finished_good_name
+        FROM production_orders po
+        LEFT JOIN finished_goods fg ON fg.id = po.finished_good_id
+        WHERE po.plant_id = $1
+          AND po.warehouse_id = $2
+          AND po.status = 'COMPLETED'
+          AND ROUND(po.actual_qty::numeric, 3) <> ROUND(po.planned_qty::numeric, 3)
+        ORDER BY po.updated_at DESC
+        LIMIT 10
+      `,
+      [auth.plantId, query.warehouseId]
+    )
+
+    return response.json(toSuccessResponse({
+      ...report,
+      productionVarianceAlerts: varianceRowsResult.rows.map((row) => ({
+        orderId: String(row.id),
+        orderNo: String(row.order_no),
+        finishedGoodCode: row.finished_good_code ? String(row.finished_good_code) : '',
+        finishedGoodName: row.finished_good_name ? String(row.finished_good_name) : '',
+        plannedQty: Number(row.planned_qty),
+        actualQty: Number(row.actual_qty),
+        varianceQty: Number(row.actual_qty) - Number(row.planned_qty),
+        reason: row.variance_reason ? String(row.variance_reason) : 'Không có lý do',
+        completedAt: new Date(String(row.updated_at)).toISOString()
+      }))
+    }))
   }))
 
   router.get('/reports/monthly', asyncHandler(async (request, response) => {

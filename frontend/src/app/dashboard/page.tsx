@@ -1,13 +1,12 @@
 import { apiClient, formatCurrencyVnd } from '../../lib/api'
 
-const quickHighlights = [
-  { label: 'Mã tiêu thụ cao', value: 'SUGAR001' },
-  { label: 'Lệnh đang chạy', value: '12 lệnh' },
-  { label: 'Kho cần cảnh báo', value: '2/6 kho' }
-]
-
 const DashboardPage = async () => {
   const dashboard = await apiClient.getDashboard()
+  const quickHighlights = [
+    { label: 'Lệch sản lượng TP', value: `${dashboard.productionVarianceAlerts.length} lệnh` },
+    { label: 'Số giao dịch', value: `${dashboard.movementCount}` },
+    { label: 'Kho theo dõi', value: 'WH-DEMO' }
+  ]
 
   const kpis = [
     { title: 'Giá trị nhập', value: formatCurrencyVnd(dashboard.totalReceipt), trend: 'Dữ liệu thời gian thực' },
@@ -54,8 +53,20 @@ const DashboardPage = async () => {
         <article className="surface-card p-4">
           <h2 className="text-base font-semibold md:text-lg">Cảnh báo cần xử lý</h2>
           <ul className="mt-3 space-y-2 text-sm text-slate-700">
-            <li className="rounded-xl border border-amber-100 bg-amber-50 p-3">SUGAR001 dưới mức tồn tối thiểu tại kho WH-DEMO</li>
-            <li className="rounded-xl border border-rose-100 bg-rose-50 p-3">BUTTER001 lưu kho 31 ngày, cần theo dõi xoay lô</li>
+            {dashboard.productionVarianceAlerts.map((alert) => (
+              <li key={alert.orderId} className="rounded-xl border border-amber-100 bg-amber-50 p-3">
+                <p className="font-semibold">
+                  {alert.orderNo} - {alert.finishedGoodCode} {alert.finishedGoodName}
+                </p>
+                <p>Kế hoạch: {alert.plannedQty} | Thực tế: {alert.actualQty} | Lệch: {alert.varianceQty}</p>
+                <p>Lý do: {alert.reason}</p>
+              </li>
+            ))}
+            {dashboard.productionVarianceAlerts.length === 0 && (
+              <li className="rounded-xl border border-emerald-100 bg-emerald-50 p-3">
+                Không có lệnh thành phẩm lệch sản lượng so với kế hoạch
+              </li>
+            )}
           </ul>
         </article>
         <article className="surface-card p-4">

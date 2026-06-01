@@ -33,6 +33,10 @@ const getStatusClassName = (status: string) => {
     return 'bg-emerald-100 text-emerald-700'
   }
 
+  if (status === 'CANCELLED') {
+    return 'bg-rose-100 text-rose-700'
+  }
+
   if (status === 'RELEASED' || status === 'IN_PROGRESS') {
     return 'bg-blue-100 text-blue-700'
   }
@@ -57,10 +61,12 @@ const FinishedGoodsPage = () => {
   const [inventoryReferenceNo, setInventoryReferenceNo] = useState(`FG-${Date.now()}`)
   const [tablePageSize, setTablePageSize] = useState<10 | 20 | 50>(10)
   const [actualQtyByOrderId, setActualQtyByOrderId] = useState<Record<string, string>>({})
+  const [varianceReasonByOrderId, setVarianceReasonByOrderId] = useState<Record<string, string>>({})
   const [processingOrderId, setProcessingOrderId] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const canApproveProduction = session?.permissions.includes('production.approve') || session?.permissions.includes('production.create')
+  const canCancelProduction = session?.permissions.includes('production.cancel') || session?.permissions.includes('production.create')
   const canCancelIssue = session?.permissions.includes('inventory.cancel')
     || session?.permissions.includes('inventory.issue')
     || session?.permissions.includes('inventory.adjust')
@@ -209,10 +215,21 @@ const FinishedGoodsPage = () => {
   }
 
   const handleCompleteOrder = async (orderId: string) => {
+    const order = orders.find((item) => item.id === orderId)
+    if (!order) {
+      setFeedback('Không tìm thấy lệnh sản xuất')
+      return
+    }
     const actualQty = Number(actualQtyByOrderId[orderId] ?? '')
+    const varianceReason = (varianceReasonByOrderId[orderId] ?? '').trim()
 
     if (actualQty <= 0) {
       setFeedback('Sản lượng thực tế phải lớn hơn 0')
+      return
+    }
+    const hasVariance = Number(actualQty.toFixed(3)) !== Number(order.plannedQty.toFixed(3))
+    if (hasVariance && !varianceReason) {
+      setFeedback('Sản lượng thực tế khác kế hoạch, vui lòng nhập lý do')
       return
     }
 
@@ -223,12 +240,32 @@ const FinishedGoodsPage = () => {
         orderId,
         actualQty,
         outputUnitCost: 0,
-        movedAt: new Date().toISOString()
+        movedAt: new Date().toISOString(),
+        varianceReason: hasVariance ? varianceReason : undefined
       })
       await loadData()
       setFeedback('Đã hoàn thành lệnh: NVL đã trừ và tồn kho thành phẩm đã tăng')
     } catch (completeError) {
       setFeedback(completeError instanceof Error ? completeError.message : 'Không thể hoàn thành lệnh sản xuất')
+    } finally {
+      setProcessingOrderId(null)
+    }
+  }
+
+  const handleCancelOrder = async (orderId: string, orderNo: string) => {
+    const confirmed = window.confirm(`Bạn có chắc chắn muốn huỷ lệnh ${orderNo}?`)
+    if (!confirmed) {
+      return
+    }
+
+    setProcessingOrderId(orderId)
+    setFeedback(null)
+    try {
+      await apiClient.cancelProductionOrder(orderId)
+      await loadData()
+      setFeedback(`Đã huỷ lệnh sản xuất ${orderNo}`)
+    } catch (cancelError) {
+      setFeedback(cancelError instanceof Error ? cancelError.message : 'Không thể huỷ lệnh sản xuất')
     } finally {
       setProcessingOrderId(null)
     }
@@ -517,6 +554,7 @@ const FinishedGoodsPage = () => {
                     <th className="px-3 py-2">Sản phẩm</th>
                     <th className="px-3 py-2 text-right">SL kế hoạch</th>
                     <th className="px-3 py-2 text-right">SL thực tế</th>
+                    <th className="px-3 py-2">Lý do lệch</th>
                     <th className="px-3 py-2">Trạng thái</th>
                     <th className="px-3 py-2">Thời gian tạo</th>
                     <th className="px-3 py-2 text-right">Thao tác</th>
@@ -533,6 +571,7 @@ const FinishedGoodsPage = () => {
                       </td>
                       <td className="px-3 py-3 text-right">{order.plannedQty}</td>
                       <td className="px-3 py-3 text-right">{order.actualQty}</td>
+                      <td className="px-3 py-3">{order.varianceReason || '-'}</td>
                       <td className="px-3 py-3">
                         <span className={`status-pill w-fit ${getStatusClassName(order.status)}`}>
                           {order.statusLabel}
@@ -542,35 +581,56 @@ const FinishedGoodsPage = () => {
                       <td className="px-3 py-3 text-right">
                         {order.status === 'DRAFT' && (
                           <div className="flex flex-col items-end gap-1">
-                            <button
-                              type="button"
-                              onClick={() => handleApproveOrder(order.id)}
-                              disabled={processingOrderId === order.id || !canApproveProduction}
-                              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-                            >
-                              {processingOrderId === order.id ? 'Đang duyệt...' : 'Duyệt lệnh'}
-                            </button>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleApproveOrder(order.id)}
+                                disabled={processingOrderId === order.id || !canApproveProduction}
+                                className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                              >
+                                {processingOrderId === order.id ? 'Đang duyệt...' : 'Duyệt lệnh'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleCancelOrder(order.id, order.orderNo)}
+                                disabled={processingOrderId === order.id || !canCancelProduction}
+                                className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-600 disabled:opacity-50"
+                              >
+                                {processingOrderId === order.id ? 'Đang huỷ...' : 'Huỷ lệnh'}
+                              </button>
+                            </div>
                             {!canApproveProduction && (
                               <span className="text-xs text-amber-700">Chưa có quyền duyệt</span>
+                            )}
+                            {!canCancelProduction && (
+                              <span className="text-xs text-amber-700">Chưa có quyền huỷ lệnh</span>
                             )}
                           </div>
                         )}
                         {(order.status === 'RELEASED' || order.status === 'IN_PROGRESS') && (
-                          <div className="flex items-center justify-end gap-2">
+                          <div className="flex flex-col items-end gap-2">
+                            <div className="flex items-center justify-end gap-2">
+                              <input
+                                placeholder="SL thực tế"
+                                value={actualQtyByOrderId[order.id] ?? ''}
+                                onChange={(event) => setActualQtyByOrderId((previous) => ({ ...previous, [order.id]: event.target.value }))}
+                                className="w-24 rounded-lg border border-slate-200 bg-white p-1.5 text-sm"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleCompleteOrder(order.id)}
+                                disabled={processingOrderId === order.id}
+                                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                              >
+                                {processingOrderId === order.id ? 'Đang hoàn thành...' : 'Hoàn thành'}
+                              </button>
+                            </div>
                             <input
-                              placeholder="SL thực tế"
-                              value={actualQtyByOrderId[order.id] ?? ''}
-                              onChange={(event) => setActualQtyByOrderId((previous) => ({ ...previous, [order.id]: event.target.value }))}
-                              className="w-24 rounded-lg border border-slate-200 bg-white p-1.5 text-sm"
+                              placeholder="Lý do nếu lệch kế hoạch"
+                              value={varianceReasonByOrderId[order.id] ?? ''}
+                              onChange={(event) => setVarianceReasonByOrderId((previous) => ({ ...previous, [order.id]: event.target.value }))}
+                              className="w-56 rounded-lg border border-slate-200 bg-white p-1.5 text-xs"
                             />
-                            <button
-                              type="button"
-                              onClick={() => handleCompleteOrder(order.id)}
-                              disabled={processingOrderId === order.id}
-                              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-                            >
-                              {processingOrderId === order.id ? 'Đang hoàn thành...' : 'Hoàn thành'}
-                            </button>
                           </div>
                         )}
                         {order.status === 'COMPLETED' && <span className="text-xs text-slate-400">-</span>}
@@ -579,7 +639,7 @@ const FinishedGoodsPage = () => {
                   ))}
                   {orders.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="px-3 py-4 text-center text-slate-500">
+                      <td colSpan={8} className="px-3 py-4 text-center text-slate-500">
                         Chưa có lệnh sản xuất
                       </td>
                     </tr>

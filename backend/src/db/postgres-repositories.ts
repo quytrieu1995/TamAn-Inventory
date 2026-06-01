@@ -57,6 +57,7 @@ const mapProductionOrder = (row: Record<string, unknown>): ProductionOrder => ({
   recipeId: String(row.recipe_id),
   plannedQty: Number(row.planned_qty),
   actualQty: Number(row.actual_qty),
+  varianceReason: row.variance_reason ? String(row.variance_reason) : null,
   status: String(row.status) as ProductionOrder['status'],
   createdAt: new Date(String(row.created_at)).toISOString()
 })
@@ -338,12 +339,13 @@ const createProductionRepository = (db: DbExecutor): FoodInventoryRepositories['
       `
         INSERT INTO production_orders (
           id, plant_id, warehouse_id, order_no, finished_good_id, recipe_id,
-          planned_qty, actual_qty, status, created_at, updated_at
+          planned_qty, actual_qty, variance_reason, status, created_at, updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), now())
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now(), now())
         ON CONFLICT (id)
         DO UPDATE SET
           actual_qty = EXCLUDED.actual_qty,
+          variance_reason = EXCLUDED.variance_reason,
           status = EXCLUDED.status,
           updated_at = now()
       `,
@@ -356,6 +358,7 @@ const createProductionRepository = (db: DbExecutor): FoodInventoryRepositories['
         order.recipeId,
         order.plannedQty,
         order.actualQty,
+        order.varianceReason ?? null,
         order.status
       ]
     )
@@ -365,7 +368,7 @@ const createProductionRepository = (db: DbExecutor): FoodInventoryRepositories['
     const result = await db.query(
       `
         SELECT id, plant_id, warehouse_id, order_no, finished_good_id, recipe_id,
-               planned_qty, actual_qty, status, created_at
+               planned_qty, actual_qty, variance_reason, status, created_at
         FROM production_orders
         WHERE id = $1
       `,
