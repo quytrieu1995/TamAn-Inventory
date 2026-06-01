@@ -12,6 +12,7 @@ import TablePageSizeControl from '../../components/TablePageSizeControl'
 type RecipeItemDraft = {
   materialId: string
   qtyPerUnit: string
+  applyLoss: boolean
 }
 
 type ProductStatusFilter = 'ALL' | 'ACTIVE' | 'INACTIVE'
@@ -33,10 +34,21 @@ const calculateExpectedOutputQty = (items: RecipeItemDraft[], lossRatePercent: n
   }, 0)
 
   const normalizedLossRatePercent = Math.max(0, Math.min(lossRatePercent, 99.99))
-  const expectedOutputQty = totalInputQty * (1 - normalizedLossRatePercent / 100)
+  const adjustedInputQty = items.reduce((sum, item) => {
+    const qty = Number(item.qtyPerUnit)
+    if (!Number.isFinite(qty) || qty <= 0) {
+      return sum
+    }
+    if (!item.applyLoss) {
+      return sum + qty
+    }
+    return sum + qty * (1 / (1 - normalizedLossRatePercent / 100))
+  }, 0)
+  const expectedOutputQty = adjustedInputQty * (1 - normalizedLossRatePercent / 100)
 
   return {
     totalInputQty,
+    adjustedInputQty,
     expectedOutputQty
   }
 }
@@ -88,7 +100,8 @@ const RecipesPage = () => {
       setRecipeItems([
         {
           materialId: activeMaterial.id,
-          qtyPerUnit: '0.1'
+          qtyPerUnit: '0.1',
+          applyLoss: false
         }
       ])
     }
@@ -181,6 +194,13 @@ const RecipesPage = () => {
           return item
         }
 
+        if (field === 'applyLoss') {
+          return {
+            ...item,
+            applyLoss: value === 'true'
+          }
+        }
+
         return {
           ...item,
           [field]: value
@@ -198,7 +218,8 @@ const RecipesPage = () => {
       ...previous,
       {
         materialId: activeMaterials[0].id,
-        qtyPerUnit: '0.1'
+        qtyPerUnit: '0.1',
+        applyLoss: false
       }
     ])
   }
@@ -208,6 +229,13 @@ const RecipesPage = () => {
       return previous.map((item, itemIndex) => {
         if (itemIndex !== index) {
           return item
+        }
+
+        if (field === 'applyLoss') {
+          return {
+            ...item,
+            applyLoss: value === 'true'
+          }
         }
 
         return {
@@ -227,7 +255,8 @@ const RecipesPage = () => {
       ...previous,
       {
         materialId: activeMaterials[0].id,
-        qtyPerUnit: '0.1'
+        qtyPerUnit: '0.1',
+        applyLoss: false
       }
     ])
   }
@@ -284,7 +313,8 @@ const RecipesPage = () => {
         },
         items: recipeItems.map((item) => ({
           materialId: item.materialId,
-          qtyPerUnit: Number(item.qtyPerUnit)
+          qtyPerUnit: Number(item.qtyPerUnit),
+          applyLoss: item.applyLoss
         }))
       })
       setProductCode('')
@@ -296,7 +326,8 @@ const RecipesPage = () => {
         setRecipeItems([
           {
             materialId: activeMaterials[0].id,
-            qtyPerUnit: '0.1'
+            qtyPerUnit: '0.1',
+            applyLoss: false
           }
         ])
       } else {
@@ -322,7 +353,8 @@ const RecipesPage = () => {
       setRecipeItems([
         {
           materialId: activeMaterials[0].id,
-          qtyPerUnit: '0.1'
+          qtyPerUnit: '0.1',
+          applyLoss: false
         }
       ])
     } else {
@@ -358,7 +390,8 @@ const RecipesPage = () => {
       setEditingProductLossRatePercent(String(recipeSummary?.lossRatePercent ?? 0))
       setEditingRecipeItems(detail.items.map((item) => ({
         materialId: item.materialId,
-        qtyPerUnit: String(item.qtyPerUnit)
+        qtyPerUnit: String(item.qtyPerUnit),
+        applyLoss: Number(item.scrapRatio ?? 0) > 0
       })))
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : 'Không thể tải chi tiết BOM')
@@ -376,7 +409,8 @@ const RecipesPage = () => {
       setDetailLossRatePercent(detail.lossRatePercent ?? 0)
       setDetailRecipeItems(detail.items.map((item) => ({
         materialId: item.materialId,
-        qtyPerUnit: String(item.qtyPerUnit)
+        qtyPerUnit: String(item.qtyPerUnit),
+        applyLoss: Number(item.scrapRatio ?? 0) > 0
       })))
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : 'Không thể tải chi tiết BOM')
@@ -438,7 +472,8 @@ const RecipesPage = () => {
         productUnitPrice: parsedEditingUnitPrice,
         items: editingRecipeItems.map((item) => ({
           materialId: item.materialId,
-          qtyPerUnit: Number(item.qtyPerUnit)
+          qtyPerUnit: Number(item.qtyPerUnit),
+          applyLoss: item.applyLoss
         }))
       })
       await loadData()
@@ -639,172 +674,186 @@ const RecipesPage = () => {
       </section>
 
       {detailRecipeId && (
-        <section className="surface-card p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-base font-semibold">Chi tiết BOM sản phẩm</h2>
-            <button
-              type="button"
-              onClick={() => {
-                setDetailRecipeId(null)
-                setDetailLossRatePercent(0)
-                setDetailRecipeItems([])
-              }}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs"
-            >
-              Đóng
-            </button>
-          </div>
-          <p className="mb-3 text-xs text-slate-500">BOM ID: {detailRecipeId}</p>
-          <p className="mb-3 text-xs text-slate-500">Tỷ lệ hao hụt: {detailLossRatePercent}%</p>
-          <p className="mb-3 text-xs text-slate-500">
-            Tổng NVL: {detailLossProjection.totalInputQty.toFixed(3)} | Thành phẩm sau hao hụt: {detailLossProjection.expectedOutputQty.toFixed(3)}
-          </p>
-          <div className="mb-3">
-            <TablePageSizeControl value={tablePageSize} onChange={setTablePageSize} />
-          </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="px-3 py-2">Nguyên liệu</th>
-                  <th className="px-3 py-2">Khối lượng</th>
-                  <th className="px-3 py-2">Đơn vị tính NVL</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {visibleDetailRecipeItems.map((item, index) => {
-                  const material = materialMap.get(item.materialId)
-                  return (
-                    <tr key={`${detailRecipeId}-${item.materialId}-${index}`} className="bg-white">
-                      <td className="px-3 py-3">
-                        {material ? `${material.code} - ${material.name}` : item.materialId}
-                      </td>
-                      <td className="px-3 py-3">{item.qtyPerUnit}</td>
-                      <td className="px-3 py-3">{material?.uom ?? '-'}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </section>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4">
+          <section className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-2xl bg-white p-4 shadow-xl" role="dialog" aria-modal="true" aria-label="Chi tiết BOM sản phẩm">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-base font-semibold">Chi tiết BOM sản phẩm</h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setDetailRecipeId(null)
+                  setDetailLossRatePercent(0)
+                  setDetailRecipeItems([])
+                }}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs"
+              >
+                Đóng
+              </button>
+            </div>
+            <p className="mb-3 text-xs text-slate-500">BOM ID: {detailRecipeId}</p>
+            <p className="mb-3 text-xs text-slate-500">Tỷ lệ hao hụt: {detailLossRatePercent}%</p>
+            <p className="mb-3 text-xs text-slate-500">
+              Tổng NVL: {detailLossProjection.totalInputQty.toFixed(3)} | NVL sau bù hao hụt: {detailLossProjection.adjustedInputQty.toFixed(3)} | Thành phẩm sau hao hụt: {detailLossProjection.expectedOutputQty.toFixed(3)}
+            </p>
+            <div className="mb-3">
+              <TablePageSizeControl value={tablePageSize} onChange={setTablePageSize} />
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-200 text-sm">
+                <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2">Nguyên liệu</th>
+                    <th className="px-3 py-2">Khối lượng</th>
+                    <th className="px-3 py-2">Hao hụt</th>
+                    <th className="px-3 py-2">Đơn vị tính NVL</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {visibleDetailRecipeItems.map((item, index) => {
+                    const material = materialMap.get(item.materialId)
+                    return (
+                      <tr key={`${detailRecipeId}-${item.materialId}-${index}`} className="bg-white">
+                        <td className="px-3 py-3">
+                          {material ? `${material.code} - ${material.name}` : item.materialId}
+                        </td>
+                        <td className="px-3 py-3">{item.qtyPerUnit}</td>
+                        <td className="px-3 py-3">{item.applyLoss ? `Có (${detailLossRatePercent}%)` : 'Không'}</td>
+                        <td className="px-3 py-3">{material?.uom ?? '-'}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
       )}
 
       {editingRecipeId && (
-        <section className="surface-card p-4">
-          <h2 className="mb-3 text-base font-semibold">Chỉnh sửa BOM sản phẩm</h2>
-          <form onSubmit={handleUpdateRecipe} className="grid grid-cols-1 gap-3">
-            <label className="text-sm">
-              <span>Tên sản phẩm</span>
-              <input
-                className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2"
-                value={editingProductName}
-                onChange={(event) => setEditingProductName(event.target.value)}
-              />
-            </label>
-            <label className="text-sm">
-              <span>Đơn vị tính sản phẩm</span>
-              <select
-                className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2"
-                value={editingProductUom}
-                onChange={(event) => setEditingProductUom(event.target.value as FinishedGoodUom)}
-              >
-                {FINISHED_GOOD_UOM_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="text-sm">
-              <span>Đơn giá sản phẩm</span>
-              <input
-                className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2"
-                value={editingProductUnitPrice}
-                onChange={(event) => setEditingProductUnitPrice(event.target.value)}
-              />
-            </label>
-            <label className="text-sm">
-              <span>Tỷ lệ hao hụt (%)</span>
-              <input
-                className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2"
-                value={editingProductLossRatePercent}
-                onChange={(event) => setEditingProductLossRatePercent(event.target.value)}
-              />
-            </label>
-            <p className="text-xs text-slate-500">
-              Tổng NVL: {editingLossProjection.totalInputQty.toFixed(3)} | Thành phẩm sau hao hụt: {editingLossProjection.expectedOutputQty.toFixed(3)}
-            </p>
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <div className="mb-2 flex items-center justify-between">
-                <p className="text-sm font-semibold">Thành phần nguyên liệu</p>
-                <button
-                  type="button"
-                  onClick={handleAddEditingRecipeItem}
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs"
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 p-4">
+          <section className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-2xl bg-white p-4 shadow-xl" role="dialog" aria-modal="true" aria-label="Chỉnh sửa BOM sản phẩm">
+            <h2 className="mb-3 text-base font-semibold">Chỉnh sửa BOM sản phẩm</h2>
+            <form onSubmit={handleUpdateRecipe} className="grid grid-cols-1 gap-3">
+              <label className="text-sm">
+                <span>Tên sản phẩm</span>
+                <input
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2"
+                  value={editingProductName}
+                  onChange={(event) => setEditingProductName(event.target.value)}
+                />
+              </label>
+              <label className="text-sm">
+                <span>Đơn vị tính sản phẩm</span>
+                <select
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2"
+                  value={editingProductUom}
+                  onChange={(event) => setEditingProductUom(event.target.value as FinishedGoodUom)}
                 >
-                  + Thêm nguyên liệu
+                  {FINISHED_GOOD_UOM_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm">
+                <span>Đơn giá sản phẩm</span>
+                <input
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2"
+                  value={editingProductUnitPrice}
+                  onChange={(event) => setEditingProductUnitPrice(event.target.value)}
+                />
+              </label>
+              <label className="text-sm">
+                <span>Tỷ lệ hao hụt (%)</span>
+                <input
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2"
+                  value={editingProductLossRatePercent}
+                  onChange={(event) => setEditingProductLossRatePercent(event.target.value)}
+                />
+              </label>
+              <p className="text-xs text-slate-500">
+                Tổng NVL: {editingLossProjection.totalInputQty.toFixed(3)} | NVL sau bù hao hụt: {editingLossProjection.adjustedInputQty.toFixed(3)} | Thành phẩm sau hao hụt: {editingLossProjection.expectedOutputQty.toFixed(3)}
+              </p>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <p className="text-sm font-semibold">Thành phần nguyên liệu</p>
+                  <button
+                    type="button"
+                    onClick={handleAddEditingRecipeItem}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs"
+                  >
+                    + Thêm nguyên liệu
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  {editingRecipeItems.map((item, index) => {
+                    const selectedMaterial = materialMap.get(item.materialId)
+                    return (
+                      <div key={`${editingRecipeId}-${item.materialId}-${index}`} className="grid grid-cols-1 gap-2 rounded-lg border border-slate-200 bg-white p-2 md:grid-cols-7">
+                        <select
+                          className="rounded-lg border border-slate-200 bg-white p-2 text-sm md:col-span-2"
+                          value={item.materialId}
+                          onChange={(event) => handleEditingRecipeItemChange(index, 'materialId', event.target.value)}
+                        >
+                          {activeMaterials.map((material) => (
+                            <option key={material.id} value={material.id}>
+                              {material.code} - {material.name}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          className="rounded-lg border border-slate-200 bg-white p-2 text-sm"
+                          placeholder={`Khối lượng (${selectedMaterial?.uom ?? 'đv'})`}
+                          value={item.qtyPerUnit}
+                          onChange={(event) => handleEditingRecipeItemChange(index, 'qtyPerUnit', event.target.value)}
+                        />
+                        <input
+                          className="rounded-lg border border-slate-200 bg-slate-100 p-2 text-sm"
+                          value={selectedMaterial?.uom ?? '-'}
+                          readOnly
+                          aria-label="Đơn vị tính NVL"
+                        />
+                        <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-2 py-2 text-xs">
+                          <input
+                            type="checkbox"
+                            checked={item.applyLoss}
+                            onChange={(event) => handleEditingRecipeItemChange(index, 'applyLoss', String(event.target.checked))}
+                          />
+                          Áp dụng hao hụt
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveEditingRecipeItem(index)}
+                          className="rounded-lg border border-rose-200 px-2 py-2 text-xs text-rose-600"
+                        >
+                          Xoá
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button type="submit" disabled={!canManageRecipe || submitting || editingValidationErrors.length > 0} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                  {submitting ? 'Đang lưu...' : 'Lưu cập nhật'}
+                </button>
+                <button type="button" onClick={handleCancelEditRecipe} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm">
+                  Huỷ
                 </button>
               </div>
-
-              <div className="space-y-2">
-                {editingRecipeItems.map((item, index) => {
-                  const selectedMaterial = materialMap.get(item.materialId)
-                  return (
-                    <div key={`${editingRecipeId}-${item.materialId}-${index}`} className="grid grid-cols-1 gap-2 rounded-lg border border-slate-200 bg-white p-2 md:grid-cols-6">
-                      <select
-                        className="rounded-lg border border-slate-200 bg-white p-2 text-sm md:col-span-2"
-                        value={item.materialId}
-                        onChange={(event) => handleEditingRecipeItemChange(index, 'materialId', event.target.value)}
-                      >
-                        {activeMaterials.map((material) => (
-                          <option key={material.id} value={material.id}>
-                            {material.code} - {material.name}
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        className="rounded-lg border border-slate-200 bg-white p-2 text-sm"
-                        placeholder={`Khối lượng (${selectedMaterial?.uom ?? 'đv'})`}
-                        value={item.qtyPerUnit}
-                        onChange={(event) => handleEditingRecipeItemChange(index, 'qtyPerUnit', event.target.value)}
-                      />
-                      <input
-                        className="rounded-lg border border-slate-200 bg-slate-100 p-2 text-sm"
-                        value={selectedMaterial?.uom ?? '-'}
-                        readOnly
-                        aria-label="Đơn vị tính NVL"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveEditingRecipeItem(index)}
-                        className="rounded-lg border border-rose-200 px-2 py-2 text-xs text-rose-600"
-                      >
-                        Xoá
-                      </button>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <button type="submit" disabled={!canManageRecipe || submitting || editingValidationErrors.length > 0} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
-                {submitting ? 'Đang lưu...' : 'Lưu cập nhật'}
-              </button>
-              <button type="button" onClick={handleCancelEditRecipe} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm">
-                Huỷ
-              </button>
-            </div>
-          </form>
-          {editingValidationErrors.length > 0 && (
-            <ul className="mt-2 space-y-1 text-sm text-rose-600">
-              {editingValidationErrors.map((error) => (
-                <li key={`edit-${error}`}>- {error}</li>
-              ))}
-            </ul>
-          )}
-        </section>
+            </form>
+            {editingValidationErrors.length > 0 && (
+              <ul className="mt-2 space-y-1 text-sm text-rose-600">
+                {editingValidationErrors.map((error) => (
+                  <li key={`edit-${error}`}>- {error}</li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
       )}
 
       {showCreateProductModal && (
@@ -858,7 +907,7 @@ const RecipesPage = () => {
                 </label>
               </div>
               <p className="text-xs text-slate-500">
-                Tổng NVL: {createLossProjection.totalInputQty.toFixed(3)} | Thành phẩm sau hao hụt: {createLossProjection.expectedOutputQty.toFixed(3)}
+                Tổng NVL: {createLossProjection.totalInputQty.toFixed(3)} | NVL sau bù hao hụt: {createLossProjection.adjustedInputQty.toFixed(3)} | Thành phẩm sau hao hụt: {createLossProjection.expectedOutputQty.toFixed(3)}
               </p>
 
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -877,7 +926,7 @@ const RecipesPage = () => {
                   {recipeItems.map((item, index) => {
                     const selectedMaterial = materialMap.get(item.materialId)
                     return (
-                      <div key={`${item.materialId}-${index}`} className="grid grid-cols-1 gap-2 rounded-lg border border-slate-200 bg-white p-2 md:grid-cols-6">
+                      <div key={`${item.materialId}-${index}`} className="grid grid-cols-1 gap-2 rounded-lg border border-slate-200 bg-white p-2 md:grid-cols-7">
                         <select
                           className="rounded-lg border border-slate-200 bg-white p-2 text-sm md:col-span-2"
                           value={item.materialId}
@@ -901,6 +950,14 @@ const RecipesPage = () => {
                           readOnly
                           aria-label="Đơn vị tính NVL"
                         />
+                        <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-2 py-2 text-xs">
+                          <input
+                            type="checkbox"
+                            checked={item.applyLoss}
+                            onChange={(event) => handleRecipeItemChange(index, 'applyLoss', String(event.target.checked))}
+                          />
+                          Áp dụng hao hụt
+                        </label>
                         <button
                           type="button"
                           onClick={() => handleRemoveRecipeItem(index)}

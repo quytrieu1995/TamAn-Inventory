@@ -506,71 +506,87 @@ const FinishedGoodsPage = () => {
                 Không có sản phẩm đang hoạt động để tạo lệnh sản xuất.
               </p>
             )}
-
-            <ul className="space-y-3">
-              {orders.map((order) => (
-                <li
-                  key={order.orderNo}
-                  tabIndex={0}
-                  aria-label={`Lệnh ${order.orderNo}`}
-                  className="rounded-xl border border-slate-100 bg-white p-3"
-                >
-                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">{order.orderNo}</p>
-                      <p className="text-sm text-slate-600">
-                        Sản phẩm:{' '}
+            <div className="mb-3">
+              <TablePageSizeControl value={tablePageSize} onChange={setTablePageSize} />
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-200 text-sm">
+                <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2">Mã lệnh</th>
+                    <th className="px-3 py-2">Sản phẩm</th>
+                    <th className="px-3 py-2 text-right">SL kế hoạch</th>
+                    <th className="px-3 py-2 text-right">SL thực tế</th>
+                    <th className="px-3 py-2">Trạng thái</th>
+                    <th className="px-3 py-2">Thời gian tạo</th>
+                    <th className="px-3 py-2 text-right">Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {orders.slice(0, tablePageSize).map((order) => (
+                    <tr key={order.id}>
+                      <td className="px-3 py-3 font-semibold">{order.orderNo}</td>
+                      <td className="px-3 py-3">
                         {finishedGoodMap.get(order.finishedGoodId)
                           ? `${finishedGoodMap.get(order.finishedGoodId)?.code} - ${finishedGoodMap.get(order.finishedGoodId)?.name}`
                           : order.finishedGoodId}
-                      </p>
-                    </div>
-                    <span className={`status-pill w-fit ${getStatusClassName(order.status)}`}>
-                      {order.statusLabel}
-                    </span>
-                  </div>
-                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
-                    <p className="rounded-lg bg-slate-50 p-2 text-center">Kế hoạch: {order.plannedQty}</p>
-                    <p className="rounded-lg bg-slate-50 p-2 text-center">Thực tế: {order.actualQty}</p>
-                    <p className="rounded-lg bg-slate-50 p-2 text-center">Kho: {order.warehouseId.slice(0, 8)}...</p>
-                    <p className="rounded-lg bg-slate-50 p-2 text-center">Tạo lúc: {new Date(order.createdAt).toLocaleString('vi-VN')}</p>
-                  </div>
-                  {order.status === 'DRAFT' && (
-                    <div className="mt-3">
-                      <button
-                        type="button"
-                        onClick={() => handleApproveOrder(order.id)}
-                        disabled={processingOrderId === order.id || !canApproveProduction}
-                        className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
-                      >
-                        {processingOrderId === order.id ? 'Đang duyệt...' : 'Duyệt lệnh'}
-                      </button>
-                      {!canApproveProduction && (
-                        <p className="mt-1 text-xs text-amber-700">Bạn chưa có quyền xét duyệt sản xuất</p>
-                      )}
-                    </div>
+                      </td>
+                      <td className="px-3 py-3 text-right">{order.plannedQty}</td>
+                      <td className="px-3 py-3 text-right">{order.actualQty}</td>
+                      <td className="px-3 py-3">
+                        <span className={`status-pill w-fit ${getStatusClassName(order.status)}`}>
+                          {order.statusLabel}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3">{new Date(order.createdAt).toLocaleString('vi-VN')}</td>
+                      <td className="px-3 py-3 text-right">
+                        {order.status === 'DRAFT' && (
+                          <div className="flex flex-col items-end gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleApproveOrder(order.id)}
+                              disabled={processingOrderId === order.id || !canApproveProduction}
+                              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                            >
+                              {processingOrderId === order.id ? 'Đang duyệt...' : 'Duyệt lệnh'}
+                            </button>
+                            {!canApproveProduction && (
+                              <span className="text-xs text-amber-700">Chưa có quyền duyệt</span>
+                            )}
+                          </div>
+                        )}
+                        {(order.status === 'RELEASED' || order.status === 'IN_PROGRESS') && (
+                          <div className="flex items-center justify-end gap-2">
+                            <input
+                              placeholder="SL thực tế"
+                              value={actualQtyByOrderId[order.id] ?? ''}
+                              onChange={(event) => setActualQtyByOrderId((previous) => ({ ...previous, [order.id]: event.target.value }))}
+                              className="w-24 rounded-lg border border-slate-200 bg-white p-1.5 text-sm"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleCompleteOrder(order.id)}
+                              disabled={processingOrderId === order.id}
+                              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                            >
+                              {processingOrderId === order.id ? 'Đang hoàn thành...' : 'Hoàn thành'}
+                            </button>
+                          </div>
+                        )}
+                        {order.status === 'COMPLETED' && <span className="text-xs text-slate-400">-</span>}
+                      </td>
+                    </tr>
+                  ))}
+                  {orders.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="px-3 py-4 text-center text-slate-500">
+                        Chưa có lệnh sản xuất
+                      </td>
+                    </tr>
                   )}
-                  {(order.status === 'RELEASED' || order.status === 'IN_PROGRESS') && (
-                    <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
-                      <input
-                        placeholder="SL thực tế"
-                        value={actualQtyByOrderId[order.id] ?? ''}
-                        onChange={(event) => setActualQtyByOrderId((previous) => ({ ...previous, [order.id]: event.target.value }))}
-                        className="rounded-lg border border-slate-200 bg-white p-2 text-sm"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleCompleteOrder(order.id)}
-                        disabled={processingOrderId === order.id}
-                        className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
-                      >
-                        {processingOrderId === order.id ? 'Đang hoàn thành...' : 'Hoàn thành'}
-                      </button>
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
+                </tbody>
+              </table>
+            </div>
           </section>
         </>
       )}

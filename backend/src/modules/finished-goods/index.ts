@@ -126,11 +126,15 @@ export const createFinishedGoodsService = ({
       throw new NotFoundError('Recipe')
     }
 
-    const effectiveLossRate = Math.max(0, Math.min(recipe.lossRatePercent, 99.99))
-    const consumptionFactor = 1 / (1 - effectiveLossRate / 100)
     const issueItems = recipe.items.map((item) => ({
       materialId: item.materialId,
-      quantity: Number((item.qtyPerUnit * input.actualQty * consumptionFactor).toFixed(3))
+      quantity: Number(
+        (
+          item.qtyPerUnit
+          * input.actualQty
+          * (1 / (1 - Math.max(0, Math.min(item.scrapRatio, 0.9999))))
+        ).toFixed(3)
+      )
     }))
 
     const consumption = await inventoryService.issueMaterialsFifo(auth, {

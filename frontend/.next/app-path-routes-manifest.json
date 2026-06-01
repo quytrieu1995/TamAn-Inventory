@@ -1,12 +1,12 @@
 {
   "/_not-found/page": "/_not-found",
-  "/reports/page": "/reports",
-  "/recipes/page": "/recipes",
-  "/suppliers/page": "/suppliers",
-  "/login/page": "/login",
-  "/page": "/",
   "/materials/page": "/materials",
+  "/suppliers/page": "/suppliers",
+  "/recipes/page": "/recipes",
   "/finished-goods/page": "/finished-goods",
-  "/users/page": "/users",
-  "/dashboard/page": "/dashboard"
+  "/page": "/",
+  "/login/page": "/login",
+  "/dashboard/page": "/dashboard",
+  "/reports/page": "/reports",
+  "/users/page": "/users"
 }

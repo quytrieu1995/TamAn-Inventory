@@ -34,7 +34,7 @@ type StatusFilter = 'ALL' | 'ACTIVE' | 'INACTIVE'
 type MaterialSubTab = 'WAREHOUSE' | 'CATALOG'
 type ActionHistoryTab = 'RECEIPT' | 'ISSUE' | 'DISPOSAL'
 
-const MATERIAL_UOM_OPTIONS = ['kg', 'g', 'ml', 'l'] as const
+const MATERIAL_UOM_OPTIONS = ['kg', 'g', 'ml', 'l', 'cái'] as const
 
 const MaterialsPage = () => {
   const searchParams = useSearchParams()

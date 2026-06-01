@@ -87,6 +87,15 @@ const ensureRecipeLossRateColumn = async (pool: RouterDependencies['pool']) => {
   )
 }
 
+const ensureRecipeItemScrapRatioColumn = async (pool: RouterDependencies['pool']) => {
+  await pool.query(
+    `
+      ALTER TABLE recipe_items
+      ADD COLUMN IF NOT EXISTS scrap_ratio NUMERIC(8, 4) NOT NULL DEFAULT 0
+    `
+  )
+}
+
 const PERMISSION_CATALOG: Array<{ code: string, description: string }> = [
   { code: 'material.view', description: 'Xem nguyên liệu' },
   { code: 'material.create', description: 'Thêm nguyên liệu' },
@@ -395,6 +404,7 @@ export const createRouter = (dependencies: RouterDependencies) => {
   router.get('/recipes/:id', asyncHandler(async (request, response) => {
     const auth = await getAuthContext(request)
     await ensureRecipeLossRateColumn(pool)
+    await ensureRecipeItemScrapRatioColumn(pool)
     const recipe = await services.recipeService.getRecipeById(auth, String(request.params.id))
     return response.json(toSuccessResponse(recipe))
   }))
@@ -914,6 +924,7 @@ export const createRouter = (dependencies: RouterDependencies) => {
     const auth = await getAuthContext(request)
     await ensureFinishedGoodsUnitPriceColumn(pool)
     await ensureRecipeLossRateColumn(pool)
+    await ensureRecipeItemScrapRatioColumn(pool)
     const schema = z.object({
       id: idSchema,
       name: z.string().min(1),
@@ -926,7 +937,8 @@ export const createRouter = (dependencies: RouterDependencies) => {
       }),
       items: z.array(z.object({
         materialId: idSchema,
-        qtyPerUnit: z.number().positive()
+        qtyPerUnit: z.number().positive(),
+        applyLoss: z.boolean().optional()
       })).min(1)
     })
 
@@ -949,7 +961,11 @@ export const createRouter = (dependencies: RouterDependencies) => {
         finishedGoodId: String(finishedGoodResult.rows[0].id),
         name: payload.name,
         lossRatePercent: payload.lossRatePercent ?? 0,
-        items: payload.items
+        items: payload.items.map((item) => ({
+          materialId: item.materialId,
+          qtyPerUnit: item.qtyPerUnit,
+          scrapRatio: item.applyLoss ? Number(((payload.lossRatePercent ?? 0) / 100).toFixed(4)) : 0
+        }))
       })
     })
 
@@ -960,6 +976,7 @@ export const createRouter = (dependencies: RouterDependencies) => {
     const auth = await getAuthContext(request)
     await ensureFinishedGoodsUnitPriceColumn(pool)
     await ensureRecipeLossRateColumn(pool)
+    await ensureRecipeItemScrapRatioColumn(pool)
     const schema = z.object({
       name: z.string().min(1),
       lossRatePercent: z.number().min(0).max(99.99).optional(),
@@ -968,14 +985,23 @@ export const createRouter = (dependencies: RouterDependencies) => {
       productUnitPrice: z.number().nonnegative().optional(),
       items: z.array(z.object({
         materialId: idSchema,
-        qtyPerUnit: z.number().positive()
+        qtyPerUnit: z.number().positive(),
+        applyLoss: z.boolean().optional()
       })).min(1)
     })
 
     const input = schema.parse(request.body)
+    const normalizedLossRatePercent = input.lossRatePercent ?? 0
     const recipe = await withTransaction(pool, async (client) => {
       const transactionalServices = createTransactionalServices(dependencies, client)
-      const updatedRecipe = await transactionalServices.recipeService.updateRecipe(auth, String(request.params.id), input)
+      const updatedRecipe = await transactionalServices.recipeService.updateRecipe(auth, String(request.params.id), {
+        ...input,
+        items: input.items.map((item) => ({
+          materialId: item.materialId,
+          qtyPerUnit: item.qtyPerUnit,
+          scrapRatio: item.applyLoss ? Number((normalizedLossRatePercent / 100).toFixed(4)) : 0
+        }))
+      })
 
       if (input.productName || input.productUom || input.productUnitPrice !== undefined) {
         await client.query(
@@ -1796,6 +1822,7 @@ export const createRouter = (dependencies: RouterDependencies) => {
     requirePermission(auth, 'recipe.view')
     await ensureFinishedGoodsUnitPriceColumn(pool)
     await ensureRecipeLossRateColumn(pool)
+    await ensureRecipeItemScrapRatioColumn(pool)
     const result = await pool.query(
       `
         SELECT

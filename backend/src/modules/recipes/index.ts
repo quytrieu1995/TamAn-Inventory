@@ -16,6 +16,7 @@ type CreateRecipeInput = {
   items: Array<{
     materialId: string
     qtyPerUnit: number
+    scrapRatio: number
   }>
 }
 
@@ -37,7 +38,8 @@ const maskRecipeForLimitedView = (recipe: Recipe): Recipe => {
     ...recipe,
     items: recipe.items.map((item) => ({
       ...item,
-      qtyPerUnit: Number(item.qtyPerUnit.toFixed(3))
+      qtyPerUnit: Number(item.qtyPerUnit.toFixed(3)),
+      scrapRatio: Number(item.scrapRatio.toFixed(4))
     }))
   }
 }

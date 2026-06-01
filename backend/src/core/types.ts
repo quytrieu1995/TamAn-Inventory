@@ -69,6 +69,7 @@ export type MaterialBatch = {
 export type RecipeItem = {
   materialId: Id
   qtyPerUnit: number
+  scrapRatio: number
 }
 
 export type Recipe = {

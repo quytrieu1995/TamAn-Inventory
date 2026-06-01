@@ -254,6 +254,7 @@ export type RecipeDetail = {
   items: Array<{
     materialId: string
     qtyPerUnit: number
+    scrapRatio: number
   }>
 }
 
@@ -622,6 +623,7 @@ export const apiClient = {
     items: Array<{
       materialId: string
       qtyPerUnit: number
+      applyLoss: boolean
     }>
   }) => {
     return requestJson('/recipes', {
@@ -638,6 +640,7 @@ export const apiClient = {
     items: Array<{
       materialId: string
       qtyPerUnit: number
+      applyLoss: boolean
     }>
   }) => {
     return requestJson<RecipeDetail>(`/recipes/${recipeId}`, {

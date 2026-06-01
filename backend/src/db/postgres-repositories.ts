@@ -247,7 +247,7 @@ const createRecipeRepository = (db: DbExecutor): FoodInventoryRepositories['reci
     const recipeRow = recipeResult.rows[0]
     const itemsResult = await db.query(
       `
-        SELECT material_id, qty_per_unit
+        SELECT material_id, qty_per_unit, scrap_ratio
         FROM recipe_items
         WHERE recipe_id = $1
       `,
@@ -263,7 +263,8 @@ const createRecipeRepository = (db: DbExecutor): FoodInventoryRepositories['reci
       lossRatePercent: Number(recipeRow.loss_rate_percent ?? 0),
       items: itemsResult.rows.map((item) => ({
         materialId: String(item.material_id),
-        qtyPerUnit: Number(item.qty_per_unit)
+        qtyPerUnit: Number(item.qty_per_unit),
+        scrapRatio: Number(item.scrap_ratio ?? 0)
       })),
       updatedAt: new Date(String(recipeRow.updated_at)).toISOString()
     }
@@ -322,10 +323,10 @@ const createRecipeRepository = (db: DbExecutor): FoodInventoryRepositories['reci
     for (const item of recipe.items) {
       await db.query(
         `
-          INSERT INTO recipe_items (id, recipe_id, material_id, qty_per_unit)
-          VALUES (gen_random_uuid(), $1, $2, $3)
+          INSERT INTO recipe_items (id, recipe_id, material_id, qty_per_unit, scrap_ratio)
+          VALUES (gen_random_uuid(), $1, $2, $3, $4)
         `,
-        [recipe.id, item.materialId, item.qtyPerUnit]
+        [recipe.id, item.materialId, item.qtyPerUnit, item.scrapRatio]
       )
     }
   }
